@@ -1,0 +1,4 @@
+# Configuración de Supabase
+
+[project]
+ref = "ytamermzvgnnroppqrug"  # Tu ID de proyecto de Supabase

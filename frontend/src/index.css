@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  /* Paleta púrpura */
+  --color-purple-50: #f5f3ff;
+  --color-purple-100: #ede9fe;
+  --color-purple-200: #ddd6fe;
+  --color-purple-300: #c4b5fd;
+  --color-purple-400: #a78bfa;
+  --color-purple-500: #8b5cf6;
+  --color-purple-600: #7c3aed;
+  --color-purple-700: #5B35C5;
+  --color-purple-800: #4c1d95;
+  --color-purple-900: #3730a3;
+  --color-purple-950: #312e81;
+
+  /* Colores personalizados del tema */
+  --color-purpleLight: #EEE9FF;
+  --color-purpleDark: #3D2092;
+  --color-purpleMid: #7B55E8;
+  --color-white: #FFFFFF;
+  --color-bg: #F5F4FB;
+  --color-text: #1A1A2E;
+  --color-textMuted: #6B6B8A;
+  --color-border: #E8E6F5;
+  --color-green: #27AE60;
+  --color-orange: #E67E22;
+  --color-red: #E74C3C;
+  --color-blue: #2980B9;
+  --color-pink: #E91E8C;
+
+  /* Tipografía */
+  --font-sans: 'Nunito', 'Segoe UI', sans-serif;
+
+  /* Sombras */
+  --shadow-card: 0 2px 16px rgba(91, 53, 197, 0.06);
+  --shadow-card-hover: 0 6px 24px rgba(91, 53, 197, 0.12);
+
+  /* Bordes redondeados */
+  --radius-card: 16px;
+  --radius-input: 10px;
+  --radius-btn: 10px;
+}
+
+@layer base {
+  * {
+    border-color: #e8e6f5;
+  }
+
+  body {
+    background-color: #f5f4fb;
+    color: #1a1a2e;
+    font-family: 'Nunito', 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 700;
+  }
+}
