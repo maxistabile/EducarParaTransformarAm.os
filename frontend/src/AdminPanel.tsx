@@ -891,6 +891,20 @@ function Dashboard({
 // ═══════════════════════════════════════════════════════════════
 //  GESTIÓN DE USUARIOS (crear directivos, docentes, alumnos)
 // ═══════════════════════════════════════════════════════════════
+// Clases reutilizadas por todos los inputs/labels del formulario de
+// "Crear nuevo usuario" (antes repetidas de forma literal en cada campo).
+const INPUT_CLASS =
+  'w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+const LABEL_CLASS = 'text-[11px] font-extrabold text-textMuted block mb-[5px]'
+
+// Texto del botón de "Crear nuevo usuario" según el estado del formulario
+// (antes resuelto con un ternario anidado, difícil de leer de un vistazo).
+function textoBotonCrear(loading: boolean, rol: string): string {
+  if (loading) return 'Creando...'
+  if (rol === 'Padre') return 'Crear tutor y alumno'
+  return 'Crear usuario'
+}
+
 function GestionUsuarios({
   prefill,
   onPrefillConsumed,
@@ -928,12 +942,12 @@ function GestionUsuarios({
   const [msg, setMsg] = useState('')
 
   const load = useCallback(async () => {
-    const [{ data: us }, { data: cu }] = await Promise.all([
+    const [{ data: usuariosData }, { data: cursosData }] = await Promise.all([
       supabase.from('usuarios').select('*').order('apellido'),
       supabase.from('cursos').select('*').eq('activo', true),
     ])
-    if (us) setUsuarios(us as UsuarioPanel[])
-    if (cu) setCursos(cu as Curso[])
+    if (usuariosData) setUsuarios(usuariosData as UsuarioPanel[])
+    if (cursosData) setCursos(cursosData as Curso[])
   }, [])
 
   useEffect(() => {
@@ -982,12 +996,12 @@ function GestionUsuarios({
     })
     if (error) return { error: error.message, id: null }
 
-    const { data: u } = await supabase
+    const { data: usuarioCreado } = await supabase
       .from('usuarios')
       .select('id_usuario')
       .eq('email', datos.email)
       .single()
-    if (!u?.id_usuario) {
+    if (!usuarioCreado?.id_usuario) {
       return {
         error:
           'No se encontró el usuario recién creado para completar sus datos.',
@@ -1001,14 +1015,84 @@ function GestionUsuarios({
         apellido: datos.apellido,
         rol: datos.rol,
       })
-      .eq('id_usuario', u.id_usuario)
+      .eq('id_usuario', usuarioCreado.id_usuario)
     if (updErr) {
       return {
         error: 'no se pudo guardar nombre/rol del usuario: ' + updErr.message,
-        id: u.id_usuario,
+        id: usuarioCreado.id_usuario,
       }
     }
-    return { error: null, id: u.id_usuario }
+    return { error: null, id: usuarioCreado.id_usuario }
+  }
+
+  // Crea el usuario y el registro del alumno asociados a un tutor recién
+  // creado. Antes vivía mezclado dentro de handleCreate; se separa para que
+  // "crear un tutor" y "crear el alumno asociado" sean pasos independientes,
+  // que se puedan leer, probar y reutilizar por separado.
+  const crearAlumnoParaTutor = async (
+    idUsuarioTutor: string | null,
+  ): Promise<{ error: string | null }> => {
+    const emailAlumno = `${alumnoForm.dni}@alumno.local`
+    const { error: errAlumno, id: idAlumno } = await crearUsuario({
+      email: emailAlumno,
+      password: alumnoForm.dni,
+      nombre: alumnoForm.nombre,
+      apellido: alumnoForm.apellido,
+      rol: 'Alumno',
+    })
+    if (errAlumno) {
+      return {
+        error:
+          '⚠️ Tutor creado, pero hubo un error al crear el usuario del alumno: ' +
+          errAlumno,
+      }
+    }
+
+    const { error: alErr } = await supabase.from('alumnos').insert([
+      {
+        nombre: alumnoForm.nombre,
+        apellido: alumnoForm.apellido,
+        dni: alumnoForm.dni,
+        fecha_nacimiento: alumnoForm.fecha_nacimiento || null,
+        id_curso: alumnoForm.id_curso ? Number(alumnoForm.id_curso) : null,
+        id_usuario: idAlumno,
+        id_usuario_padre: idUsuarioTutor,
+        obra_social: alumnoForm.obra_social || null,
+      },
+    ])
+    if (alErr) {
+      return {
+        error:
+          '⚠️ Usuarios creados, pero hubo un error al registrar el alumno: ' +
+          alErr.message,
+      }
+    }
+    return { error: null }
+  }
+
+  // Crea el registro en `docentes` asociado a un usuario recién creado con
+  // rol Docente (la fila no se crea sola desde el backend). Separada del
+  // resto de handleCreate por la misma razón que crearAlumnoParaTutor.
+  const crearRegistroDocente = async (
+    idUsuario: string | null,
+  ): Promise<{ error: string | null }> => {
+    const { error: docErr } = await supabase.from('docentes').insert([
+      {
+        id_usuario: idUsuario,
+        // dni va NULL (no ''): la columna es UNIQUE y '' chocaría entre
+        // docentes sin DNI cargado.
+        dni: null,
+        activo: true,
+      },
+    ])
+    if (docErr) {
+      return {
+        error:
+          '⚠️ Usuario creado, pero no se pudo registrar en Docentes: ' +
+          docErr.message,
+      }
+    }
+    return { error: null }
   }
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -1029,67 +1113,20 @@ function GestionUsuarios({
       return
     }
 
-    // Si es Tutor: crear también el usuario del alumno (email generado desde el
-    // DNI) y el registro en `alumnos` vinculado al alumno y al tutor.
     if (form.rol === 'Padre') {
-      const emailAlumno = `${alumnoForm.dni}@alumno.local`
-      const { error: errAlumno, id: idAlumno } = await crearUsuario({
-        email: emailAlumno,
-        password: alumnoForm.dni,
-        nombre: alumnoForm.nombre,
-        apellido: alumnoForm.apellido,
-        rol: 'Alumno',
-      })
-      if (errAlumno) {
-        setMsg(
-          '⚠️ Tutor creado, pero hubo un error al crear el usuario del alumno: ' +
-            errAlumno,
-        )
-        setLoading(false)
-        load()
-        return
-      }
-
-      const { error: alErr } = await supabase.from('alumnos').insert([
-        {
-          nombre: alumnoForm.nombre,
-          apellido: alumnoForm.apellido,
-          dni: alumnoForm.dni,
-          fecha_nacimiento: alumnoForm.fecha_nacimiento || null,
-          id_curso: alumnoForm.id_curso ? Number(alumnoForm.id_curso) : null,
-          id_usuario: idAlumno,
-          id_usuario_padre: idUsuario,
-          obra_social: alumnoForm.obra_social || null,
-        },
-      ])
-      if (alErr) {
-        setMsg(
-          '⚠️ Usuarios creados, pero hubo un error al registrar el alumno: ' +
-            alErr.message,
-        )
+      const { error } = await crearAlumnoParaTutor(idUsuario)
+      if (error) {
+        setMsg(error)
         setLoading(false)
         load()
         return
       }
     }
 
-    // Si es Docente: crear también su registro en `docentes` para que aparezca
-    // en el panel de Docentes (la fila no se crea sola desde el backend).
     if (form.rol === 'Docente') {
-      const { error: docErr } = await supabase.from('docentes').insert([
-        {
-          id_usuario: idUsuario,
-          // dni va NULL (no ''): la columna es UNIQUE y '' chocaría entre
-          // docentes sin DNI cargado.
-          dni: null,
-          activo: true,
-        },
-      ])
-      if (docErr) {
-        setMsg(
-          '⚠️ Usuario creado, pero no se pudo registrar en Docentes: ' +
-            docErr.message,
-        )
+      const { error } = await crearRegistroDocente(idUsuario)
+      if (error) {
+        setMsg(error)
         setLoading(false)
         load()
         return
@@ -1113,6 +1150,7 @@ function GestionUsuarios({
     load()
     setLoading(false)
   }
+
 
   const toggleActivo = async (id: string, activo: boolean) => {
     await supabase
@@ -1154,69 +1192,69 @@ function GestionUsuarios({
             style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}
           >
             <div>
-              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+              <span className={LABEL_CLASS}>
                 Nombre
               </span>
               <input
-                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                className={INPUT_CLASS}
                 required
                 value={form.nombre}
                 onChange={(e) =>
-                  setForm((p) => ({ ...p, nombre: e.target.value }))
+                  setForm((prev) => ({ ...prev, nombre: e.target.value }))
                 }
               />
             </div>
             <div>
-              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+              <span className={LABEL_CLASS}>
                 Apellido
               </span>
               <input
-                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                className={INPUT_CLASS}
                 required
                 value={form.apellido}
                 onChange={(e) =>
-                  setForm((p) => ({ ...p, apellido: e.target.value }))
+                  setForm((prev) => ({ ...prev, apellido: e.target.value }))
                 }
               />
             </div>
             <div>
-              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+              <span className={LABEL_CLASS}>
                 Email
               </span>
               <input
                 type='email'
-                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                className={INPUT_CLASS}
                 required
                 value={form.email}
                 onChange={(e) =>
-                  setForm((p) => ({ ...p, email: e.target.value }))
+                  setForm((prev) => ({ ...prev, email: e.target.value }))
                 }
               />
             </div>
             <div>
-              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+              <span className={LABEL_CLASS}>
                 Contraseña
               </span>
               <input
                 type='password'
-                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                className={INPUT_CLASS}
                 required
                 minLength={6}
                 value={form.password}
                 onChange={(e) =>
-                  setForm((p) => ({ ...p, password: e.target.value }))
+                  setForm((prev) => ({ ...prev, password: e.target.value }))
                 }
               />
             </div>
             <div>
-              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+              <span className={LABEL_CLASS}>
                 Rol
               </span>
               <select
-                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border appearance-none'
+                className={`${INPUT_CLASS} appearance-none`}
                 value={form.rol}
                 onChange={(e) =>
-                  setForm((p) => ({ ...p, rol: e.target.value }))
+                  setForm((prev) => ({ ...prev, rol: e.target.value }))
                 }
               >
                 <option value='Docente'>Docente</option>
@@ -1247,73 +1285,73 @@ function GestionUsuarios({
                   }}
                 >
                   <div>
-                    <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                    <span className={LABEL_CLASS}>
                       Nombre del alumno
                     </span>
                     <input
-                      className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                      className={INPUT_CLASS}
                       required
                       value={alumnoForm.nombre}
                       onChange={(e) =>
-                        setAlumnoForm((p) => ({ ...p, nombre: e.target.value }))
+                        setAlumnoForm((prev) => ({ ...prev, nombre: e.target.value }))
                       }
                     />
                   </div>
                   <div>
-                    <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                    <span className={LABEL_CLASS}>
                       Apellido del alumno
                     </span>
                     <input
-                      className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                      className={INPUT_CLASS}
                       required
                       value={alumnoForm.apellido}
                       onChange={(e) =>
-                        setAlumnoForm((p) => ({
-                          ...p,
+                        setAlumnoForm((prev) => ({
+                          ...prev,
                           apellido: e.target.value,
                         }))
                       }
                     />
                   </div>
                   <div>
-                    <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                    <span className={LABEL_CLASS}>
                       DNI del alumno
                     </span>
                     <input
-                      className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                      className={INPUT_CLASS}
                       required
                       value={alumnoForm.dni}
                       onChange={(e) =>
-                        setAlumnoForm((p) => ({ ...p, dni: e.target.value }))
+                        setAlumnoForm((prev) => ({ ...prev, dni: e.target.value }))
                       }
                     />
                   </div>
                   <div>
-                    <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                    <span className={LABEL_CLASS}>
                       Fecha de nacimiento
                     </span>
                     <input
                       type='date'
-                      className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                      className={INPUT_CLASS}
                       value={alumnoForm.fecha_nacimiento}
                       onChange={(e) =>
-                        setAlumnoForm((p) => ({
-                          ...p,
+                        setAlumnoForm((prev) => ({
+                          ...prev,
                           fecha_nacimiento: e.target.value,
                         }))
                       }
                     />
                   </div>
                   <div>
-                    <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                    <span className={LABEL_CLASS}>
                       Curso
                     </span>
                     <select
-                      className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border appearance-none'
+                      className={`${INPUT_CLASS} appearance-none`}
                       value={alumnoForm.id_curso}
                       onChange={(e) =>
-                        setAlumnoForm((p) => ({
-                          ...p,
+                        setAlumnoForm((prev) => ({
+                          ...prev,
                           id_curso: e.target.value,
                         }))
                       }
@@ -1327,15 +1365,15 @@ function GestionUsuarios({
                     </select>
                   </div>
                   <div>
-                    <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                    <span className={LABEL_CLASS}>
                       Obra social
                     </span>
                     <input
-                      className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                      className={INPUT_CLASS}
                       value={alumnoForm.obra_social}
                       onChange={(e) =>
-                        setAlumnoForm((p) => ({
-                          ...p,
+                        setAlumnoForm((prev) => ({
+                          ...prev,
                           obra_social: e.target.value,
                         }))
                       }
@@ -1373,11 +1411,7 @@ function GestionUsuarios({
                     : 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer w-full'
                 }
               >
-                {loading
-                  ? 'Creando...'
-                  : form.rol === 'Padre'
-                    ? 'Crear tutor y alumno'
-                    : 'Crear usuario'}
+                {textoBotonCrear(loading, form.rol)}
               </button>
             </div>
             {msg && (
@@ -3013,9 +3047,6 @@ function GestionAsignaciones() {
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  CUOTAS — Generación automática
-// ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
 //  NOTIFICACIONES AUTOMÁTICAS A LAS FAMILIAS (R6)
 //  Crea avisos en la tabla `notificaciones`, dirigidos al usuario
