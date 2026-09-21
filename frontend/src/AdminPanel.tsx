@@ -32,6 +32,11 @@ interface PrefillAlumno {
   apellido: string
   dni: string
   fecha_nacimiento: string
+  // TP Metodología II · RF1 — datos que vienen de la preinscripción
+  direccion?: string
+  telefono?: string
+  email?: string
+  nivel?: string
 }
 
 interface PrefillUsuario {
@@ -41,6 +46,8 @@ interface PrefillUsuario {
   password: string
   rol: string
   alumno?: PrefillAlumno | null
+  // Inscripción de origen: se marca como registrada al terminar
+  id_inscripcion?: number
 }
 
 interface Alumno {
@@ -50,6 +57,14 @@ interface Alumno {
   dni: string
   activo: boolean
   cursos: { nivel: string; grado_anio: string; division: string } | null
+  // TP Metodología II · RF1 — campos mínimos del alumno
+  legajo?: string | null
+  direccion?: string | null
+  telefono?: string | null
+  email?: string | null
+  fecha_nacimiento?: string | null
+  obra_social?: string | null
+  id_curso?: number | null
 }
 
 interface Docente {
@@ -201,6 +216,7 @@ interface Inscripcion {
   estado: string
   fecha_solicitud: string
   id_alumno_creado: number | null
+  direccion_aspirante: string | null
 }
 
 interface Noticia {
@@ -937,8 +953,16 @@ function GestionUsuarios({
     fecha_nacimiento: '',
     id_curso: '',
     obra_social: '',
+    direccion: '',
+    telefono: '',
+    email: '',
   }
   const [alumnoForm, setAlumnoForm] = useState(ALUMNO_VACIO)
+  // TP Metodología II · RF1 — datos de la preinscripción de origen
+  const [idInscripcionOrigen, setIdInscripcionOrigen] = useState<
+    number | null
+  >(null)
+  const [nivelSolicitado, setNivelSolicitado] = useState('')
   const [msg, setMsg] = useState('')
 
   const load = useCallback(async () => {
@@ -972,9 +996,14 @@ function GestionUsuarios({
             fecha_nacimiento: prefill.alumno.fecha_nacimiento,
             id_curso: '',
             obra_social: '',
+            direccion: prefill.alumno.direccion ?? '',
+            telefono: prefill.alumno.telefono ?? '',
+            email: prefill.alumno.email ?? '',
           }
         : ALUMNO_VACIO,
     )
+    setIdInscripcionOrigen(prefill.id_inscripcion ?? null)
+    setNivelSolicitado(prefill.alumno?.nivel ?? '')
     setMsg('')
     setShowForm(true)
     onPrefillConsumed?.()
@@ -1032,10 +1061,11 @@ function GestionUsuarios({
   const crearAlumnoParaTutor = async (
     idUsuarioTutor: string | null,
   ): Promise<{ error: string | null }> => {
-    const emailAlumno = `${alumnoForm.dni}@alumno.local`
+    const dni = alumnoForm.dni.trim()
+    const emailAlumno = `${dni}@alumno.local`
     const { error: errAlumno, id: idAlumno } = await crearUsuario({
       email: emailAlumno,
-      password: alumnoForm.dni,
+      password: dni,
       nombre: alumnoForm.nombre,
       apellido: alumnoForm.apellido,
       rol: 'Alumno',
@@ -1048,23 +1078,45 @@ function GestionUsuarios({
       }
     }
 
-    const { error: alErr } = await supabase.from('alumnos').insert([
-      {
-        nombre: alumnoForm.nombre,
-        apellido: alumnoForm.apellido,
-        dni: alumnoForm.dni,
-        fecha_nacimiento: alumnoForm.fecha_nacimiento || null,
-        id_curso: alumnoForm.id_curso ? Number(alumnoForm.id_curso) : null,
-        id_usuario: idAlumno,
-        id_usuario_padre: idUsuarioTutor,
-        obra_social: alumnoForm.obra_social || null,
-      },
-    ])
+    const { data: alumnoCreado, error: alErr } = await supabase
+      .from('alumnos')
+      .insert([
+        {
+          nombre: alumnoForm.nombre.trim(),
+          apellido: alumnoForm.apellido.trim(),
+          dni,
+          fecha_nacimiento: alumnoForm.fecha_nacimiento || null,
+          id_curso: alumnoForm.id_curso ? Number(alumnoForm.id_curso) : null,
+          id_usuario: idAlumno,
+          id_usuario_padre: idUsuarioTutor,
+          obra_social: alumnoForm.obra_social || null,
+          // TP Metodología II · RF1 (el legajo lo asigna la base)
+          direccion: alumnoForm.direccion.trim() || null,
+          telefono: alumnoForm.telefono.trim() || null,
+          email: alumnoForm.email.trim() || null,
+        },
+      ])
+      .select('id_alumno')
+      .single()
     if (alErr) {
       return {
         error:
           '⚠️ Usuarios creados, pero hubo un error al registrar el alumno: ' +
           alErr.message,
+      }
+    }
+    // Marcar la preinscripción de origen como registrada
+    if (idInscripcionOrigen !== null && alumnoCreado?.id_alumno) {
+      const { error: insErr } = await supabase
+        .from('inscripciones')
+        .update({ id_alumno_creado: alumnoCreado.id_alumno })
+        .eq('id_inscripcion', idInscripcionOrigen)
+      if (insErr) {
+        return {
+          error:
+            '⚠️ Alumno registrado, pero no se pudo marcar la inscripción: ' +
+            insErr.message,
+        }
       }
     }
     return { error: null }
@@ -1099,6 +1151,39 @@ function GestionUsuarios({
     e.preventDefault()
     setLoading(true)
     setMsg('')
+
+    // TP Metodología II · RF1 — validar los datos del alumno ANTES de crear
+    // cualquier usuario: si algo falla después, no quedan usuarios sin alumno
+    if (form.rol === 'Padre') {
+      const errAlumno = validarAlumno({ ...FORM_ALUMNO_VACIO, ...alumnoForm })
+      if (errAlumno) {
+        setMsg(errAlumno)
+        setLoading(false)
+        return
+      }
+      const dni = alumnoForm.dni.trim()
+      const [{ data: alumnoExiste }, { data: usuarioAlumnoExiste }] =
+        await Promise.all([
+          supabase.from('alumnos').select('id_alumno').eq('dni', dni).maybeSingle(),
+          supabase
+            .from('usuarios')
+            .select('id_usuario')
+            .eq('email', `${dni}@alumno.local`)
+            .maybeSingle(),
+        ])
+      if (alumnoExiste) {
+        setMsg('Ya existe un alumno registrado con ese DNI.')
+        setLoading(false)
+        return
+      }
+      if (usuarioAlumnoExiste) {
+        setMsg(
+          `Ya existe el usuario ${dni}@alumno.local. Revisalo en la lista antes de registrar.`,
+        )
+        setLoading(false)
+        return
+      }
+    }
 
     const { error: errUser, id: idUsuario } = await crearUsuario({
       email: form.email,
@@ -1146,6 +1231,8 @@ function GestionUsuarios({
       rol: 'Docente',
     })
     setAlumnoForm(ALUMNO_VACIO)
+    setIdInscripcionOrigen(null)
+    setNivelSolicitado('')
     setShowForm(false)
     load()
     setLoading(false)
@@ -1175,7 +1262,13 @@ function GestionUsuarios({
         </h2>
         <button
           className='bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            if (showForm) {
+              setIdInscripcionOrigen(null)
+              setNivelSolicitado('')
+            }
+            setShowForm(!showForm)
+          }}
         >
           {showForm ? 'Cancelar' : '+ Nuevo usuario'}
         </button>
@@ -1333,6 +1426,7 @@ function GestionUsuarios({
                     <input
                       type='date'
                       className={INPUT_CLASS}
+                      required
                       value={alumnoForm.fecha_nacimiento}
                       onChange={(e) =>
                         setAlumnoForm((prev) => ({
@@ -1345,9 +1439,11 @@ function GestionUsuarios({
                   <div>
                     <span className={LABEL_CLASS}>
                       Curso
+                      {nivelSolicitado && ` (nivel solicitado: ${nivelSolicitado})`}
                     </span>
                     <select
                       className={`${INPUT_CLASS} appearance-none`}
+                      required
                       value={alumnoForm.id_curso}
                       onChange={(e) =>
                         setAlumnoForm((prev) => ({
@@ -1356,8 +1452,14 @@ function GestionUsuarios({
                         }))
                       }
                     >
-                      <option value=''>Sin asignar</option>
-                      {cursos.map((c) => (
+                      <option value=''>Seleccionar curso</option>
+                      {[...cursos]
+                        .sort(
+                          (a, b) =>
+                            Number(b.nivel === nivelSolicitado) -
+                            Number(a.nivel === nivelSolicitado),
+                        )
+                        .map((c) => (
                         <option key={c.id_curso} value={c.id_curso}>
                           {c.nivel} — {c.grado_anio} "{c.division}"
                         </option>
@@ -1375,6 +1477,46 @@ function GestionUsuarios({
                         setAlumnoForm((prev) => ({
                           ...prev,
                           obra_social: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <span className={LABEL_CLASS}>Domicilio</span>
+                    <input
+                      className={INPUT_CLASS}
+                      value={alumnoForm.direccion}
+                      onChange={(e) =>
+                        setAlumnoForm((prev) => ({
+                          ...prev,
+                          direccion: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <span className={LABEL_CLASS}>Teléfono de contacto</span>
+                    <input
+                      className={INPUT_CLASS}
+                      value={alumnoForm.telefono}
+                      onChange={(e) =>
+                        setAlumnoForm((prev) => ({
+                          ...prev,
+                          telefono: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <span className={LABEL_CLASS}>Correo de contacto</span>
+                    <input
+                      type='email'
+                      className={INPUT_CLASS}
+                      value={alumnoForm.email}
+                      onChange={(e) =>
+                        setAlumnoForm((prev) => ({
+                          ...prev,
+                          email: e.target.value,
                         }))
                       }
                     />
@@ -1505,6 +1647,68 @@ function GestionUsuarios({
 // ═══════════════════════════════════════════════════════════════
 //  GESTIÓN DE ALUMNOS
 // ═══════════════════════════════════════════════════════════════
+// TP Metodología II · RF1 — formulario y validaciones del módulo Alumnos
+// (mismas reglas que la preinscripción pública de Home.tsx)
+const FORM_ALUMNO_VACIO = {
+  nombre: '',
+  apellido: '',
+  dni: '',
+  fecha_nacimiento: '',
+  id_curso: '',
+  email_padre: '',
+  obra_social: '',
+  direccion: '',
+  telefono: '',
+  email: '',
+}
+type FormAlumno = typeof FORM_ALUMNO_VACIO
+
+const RX_SOLO_LETRAS = /^[A-Za-zÁÉÍÓÚáéíóúÑñÜü][A-Za-zÁÉÍÓÚáéíóúÑñÜü\s'-]*$/
+const RX_EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/
+const RX_TEL = /^[\d\s()+-]+$/
+
+function validarAlumno(f: FormAlumno): string | null {
+  const nombre = f.nombre.trim()
+  const apellido = f.apellido.trim()
+  if (nombre.length < 2 || !RX_SOLO_LETRAS.test(nombre))
+    return 'El nombre debe tener al menos 2 caracteres y solo letras.'
+  if (apellido.length < 2 || !RX_SOLO_LETRAS.test(apellido))
+    return 'El apellido debe tener al menos 2 caracteres y solo letras.'
+  if (!/^\d{7,9}$/.test(f.dni.trim()))
+    return 'El DNI debe tener entre 7 y 9 dígitos numéricos (sin puntos).'
+  if (!f.fecha_nacimiento) return 'Ingresá la fecha de nacimiento.'
+  const fnac = new Date(f.fecha_nacimiento + 'T00:00:00')
+  if (isNaN(fnac.getTime()) || fnac > new Date())
+    return 'La fecha de nacimiento no es válida.'
+  // Regla de negocio: cada alumno debe pertenecer a un único curso
+  if (!f.id_curso) return 'Seleccioná el curso del alumno.'
+  const email = f.email.trim()
+  if (email && !RX_EMAIL.test(email))
+    return 'Ingresá un email válido (ej: nombre@dominio.com).'
+  const tel = f.telefono.trim()
+  if (tel) {
+    if (!RX_TEL.test(tel))
+      return 'El teléfono solo puede tener números, espacios y los signos + - ( ).'
+    const digitos = tel.replace(/\D/g, '')
+    if (digitos.length < 7 || digitos.length > 15)
+      return 'El teléfono debe tener entre 7 y 15 dígitos.'
+  }
+  return null
+}
+
+// Traduce los errores de la base a mensajes claros para el usuario
+function mensajeErrorAlumno(raw: string): string {
+  if (/alumnos_dni_key/i.test(raw))
+    return 'Ya existe un alumno registrado con ese DNI.'
+  if (/uq_alumnos_legajo/i.test(raw))
+    return 'Ya existe un alumno con ese legajo.'
+  if (/Cupo completo/i.test(raw))
+    return 'El curso seleccionado no tiene cupo disponible.'
+  if (/Could not find the '(legajo|telefono|email)' column/i.test(raw))
+    return 'Falta correr la migración etapa9_modulo_alumnos.sql en Supabase.'
+  return 'Error: ' + raw
+}
+
 function GestionAlumnos() {
   const [alumnos, setAlumnos] = useState<Alumno[]>([])
   const [cursos, setCursos] = useState<Curso[]>([])
@@ -1515,15 +1719,13 @@ function GestionAlumnos() {
   const [editCursoId, setEditCursoId] = useState<number | null>(null)
   const [editCursoVal, setEditCursoVal] = useState<string>('')
   const [savingCurso, setSavingCurso] = useState(false)
-  const [form, setForm] = useState({
-    nombre: '',
-    apellido: '',
-    dni: '',
-    fecha_nacimiento: '',
-    id_curso: '',
-    email_padre: '',
-    obra_social: '',
-  })
+  // TP Metodología II · RF1.2 / RF1.3 / RF1.4
+  const [editId, setEditId] = useState<number | null>(null)
+  const [busqueda, setBusqueda] = useState('')
+  const [cambiandoEstadoId, setCambiandoEstadoId] = useState<number | null>(
+    null,
+  )
+  const [form, setForm] = useState<FormAlumno>(FORM_ALUMNO_VACIO)
 
   const load = useCallback(async () => {
     const [{ data: al }, { data: cu }] = await Promise.all([
@@ -1543,8 +1745,45 @@ function GestionAlumnos() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setMsg('')
+    // RF1.1 / RF1.3 — mismas reglas de validación que la preinscripción
+    const errorValidacion = validarAlumno(form)
+    if (errorValidacion) {
+      setMsg(errorValidacion)
+      return
+    }
+    setLoading(true)
+    const datosTP = {
+      direccion: form.direccion.trim() || null,
+      telefono: form.telefono.trim() || null,
+      email: form.email.trim() || null,
+    }
+
+    // RF1.3 — Modificar los datos del alumno (el legajo no se modifica)
+    if (editId !== null) {
+      const { error } = await supabase
+        .from('alumnos')
+        .update({
+          nombre: form.nombre.trim(),
+          apellido: form.apellido.trim(),
+          dni: form.dni.trim(),
+          fecha_nacimiento: form.fecha_nacimiento,
+          id_curso: Number(form.id_curso),
+          obra_social: form.obra_social || null,
+          ...datosTP,
+        })
+        .eq('id_alumno', editId)
+      if (error) {
+        setMsg(mensajeErrorAlumno(error.message))
+      } else {
+        setMsg('✅ Datos del alumno actualizados.')
+        cerrarForm()
+        load()
+      }
+      setLoading(false)
+      return
+    }
+
     // Buscar usuario padre por email
     const { data: padre } = await supabase
       .from('usuarios')
@@ -1553,20 +1792,22 @@ function GestionAlumnos() {
       .single()
     const { error } = await supabase.from('alumnos').insert([
       {
-        nombre: form.nombre,
-        apellido: form.apellido,
-        dni: form.dni,
+        nombre: form.nombre.trim(),
+        apellido: form.apellido.trim(),
+        dni: form.dni.trim(),
         fecha_nacimiento: form.fecha_nacimiento,
         id_curso: form.id_curso ? Number(form.id_curso) : null,
         id_usuario_padre: padre?.id_usuario ?? null,
         obra_social: form.obra_social || null,
+        // El legajo lo asigna la base automáticamente (etapa9)
+        ...datosTP,
       },
     ])
     if (error) {
-      setMsg('Error: ' + error.message)
+      setMsg(mensajeErrorAlumno(error.message))
     } else {
       setMsg('✅ Alumno registrado.')
-      setShowForm(false)
+      cerrarForm()
       load()
     }
     setLoading(false)
@@ -1598,6 +1839,71 @@ function GestionAlumnos() {
     load()
   }
 
+  const cerrarForm = () => {
+    setShowForm(false)
+    setEditId(null)
+    setForm(FORM_ALUMNO_VACIO)
+  }
+
+  const abrirNuevo = () => {
+    setEditId(null)
+    setForm(FORM_ALUMNO_VACIO)
+    setMsg('')
+    setShowForm(true)
+  }
+
+  // RF1.3 — Cargar los datos del alumno en el formulario
+  const abrirEditar = (a: Alumno) => {
+    setEditId(a.id_alumno)
+    setForm({
+      ...FORM_ALUMNO_VACIO,
+      nombre: a.nombre ?? '',
+      apellido: a.apellido ?? '',
+      dni: a.dni ?? '',
+      fecha_nacimiento: a.fecha_nacimiento ?? '',
+      id_curso: a.id_curso != null ? String(a.id_curso) : '',
+      obra_social: a.obra_social ?? '',
+      direccion: a.direccion ?? '',
+      telefono: a.telefono ?? '',
+      email: a.email ?? '',
+    })
+    setMsg('')
+    setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // RF1.4 — Cambiar el estado del alumno (activo / inactivo)
+  const cambiarEstado = async (a: Alumno) => {
+    const accion = a.activo ? 'desactivar' : 'activar'
+    if (!confirm(`¿Seguro que querés ${accion} a ${a.apellido}, ${a.nombre}?`))
+      return
+    setCambiandoEstadoId(a.id_alumno)
+    setMsg('')
+    const { error } = await supabase
+      .from('alumnos')
+      .update({ activo: !a.activo })
+      .eq('id_alumno', a.id_alumno)
+    setCambiandoEstadoId(null)
+    if (error) {
+      setMsg(mensajeErrorAlumno(error.message))
+    } else {
+      setMsg(`✅ Alumno ${a.activo ? 'desactivado' : 'activado'}.`)
+      load()
+    }
+  }
+
+  // RF1.2 — Consultar por legajo o DNI
+  const q = busqueda.trim().toLowerCase()
+  const alumnosFiltrados = q
+    ? alumnos.filter(
+        (a) =>
+          (a.legajo ?? '').toLowerCase().includes(q) ||
+          (a.dni ?? '').toLowerCase().includes(q),
+      )
+    : alumnos
+  const alumnoEditando =
+    editId !== null ? alumnos.find((x) => x.id_alumno === editId) : null
+
   if (legajoId !== null) {
     return (
       <LegajoAlumno idAlumno={legajoId} onClose={() => setLegajoId(null)} />
@@ -1617,7 +1923,7 @@ function GestionAlumnos() {
         <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>🎓 Alumnos</h2>
         <button
           className='bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => (showForm ? cerrarForm() : abrirNuevo())}
         >
           {showForm ? 'Cancelar' : '+ Nuevo alumno'}
         </button>
@@ -1626,12 +1932,22 @@ function GestionAlumnos() {
       {showForm && (
         <div className='bg-white rounded-card p-6 shadow-card border border-border mb-6'>
           <div className='text-[15px] font-extrabold text-text mb-5'>
-            Registrar alumno
+            {editId !== null ? 'Editar alumno' : 'Registrar alumno'}
           </div>
           <form
             onSubmit={handleCreate}
             style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}
           >
+            <div style={{ gridColumn: '1/-1' }}>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Legajo
+              </span>
+              <div className='text-[13px] font-extrabold text-purple-700'>
+                {editId !== null
+                  ? (alumnoEditando?.legajo ?? '—')
+                  : 'Se asigna automáticamente al registrar'}
+              </div>
+            </div>
             <div>
               <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
                 Nombre
@@ -1687,16 +2003,55 @@ function GestionAlumnos() {
             </div>
             <div>
               <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Domicilio
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                value={form.direccion}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, direccion: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Teléfono
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                value={form.telefono}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, telefono: e.target.value }))
+                }
+                placeholder='Ej: 362 4123456'
+              />
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Correo electrónico
+              </span>
+              <input
+                type='email'
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                value={form.email}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, email: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
                 Curso
               </span>
               <select
                 className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border appearance-none'
+                required
                 value={form.id_curso}
                 onChange={(e) =>
                   setForm((p) => ({ ...p, id_curso: e.target.value }))
                 }
               >
-                <option value=''>Sin asignar</option>
+                <option value=''>Seleccionar curso</option>
                 {cursos.map((c) => (
                   <option key={c.id_curso} value={c.id_curso}>
                     {c.nivel} — {c.grado_anio} "{c.division}"
@@ -1704,20 +2059,22 @@ function GestionAlumnos() {
                 ))}
               </select>
             </div>
-            <div>
-              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
-                Email del padre/tutor
-              </span>
-              <input
-                type='email'
-                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
-                value={form.email_padre}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, email_padre: e.target.value }))
-                }
-                placeholder='Debe existir en usuarios'
-              />
-            </div>
+            {editId === null && (
+              <div>
+                <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                  Email del padre/tutor
+                </span>
+                <input
+                  type='email'
+                  className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                  value={form.email_padre}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, email_padre: e.target.value }))
+                  }
+                  placeholder='Debe existir en usuarios'
+                />
+              </div>
+            )}
             <div>
               <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
                 Obra social
@@ -1740,7 +2097,11 @@ function GestionAlumnos() {
                     : 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer w-full'
                 }
               >
-                {loading ? 'Guardando...' : 'Registrar alumno'}
+                {loading
+                  ? 'Guardando...'
+                  : editId !== null
+                    ? 'Guardar cambios'
+                    : 'Registrar alumno'}
               </button>
             </div>
             {msg && (
@@ -1759,10 +2120,32 @@ function GestionAlumnos() {
         </div>
       )}
 
+      {!showForm && msg && (
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            marginBottom: 14,
+            color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+          }}
+        >
+          {msg}
+        </div>
+      )}
+
       <div className='bg-white rounded-card p-6 shadow-card border border-border'>
+        <input
+          className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border mb-4'
+          placeholder='🔍 Buscar por legajo o DNI'
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+        />
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
+              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
+                Legajo
+              </th>
               <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
                 Alumno
               </th>
@@ -1781,8 +2164,11 @@ function GestionAlumnos() {
             </tr>
           </thead>
           <tbody>
-            {alumnos.map((a) => (
+            {alumnosFiltrados.map((a) => (
               <tr key={a.id_alumno}>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle font-extrabold text-purple-700'>
+                  {a.legajo ?? '—'}
+                </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle font-bold'>
                   {a.apellido}, {a.nombre}
                 </td>
@@ -1846,15 +2232,50 @@ function GestionAlumnos() {
                   </span>
                 </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
-                  <button
-                    className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
-                    onClick={() => setLegajoId(a.id_alumno)}
-                  >
-                    Ver legajo
-                  </button>
+                  <div className='flex items-center gap-2'>
+                    <button
+                      className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                      onClick={() => setLegajoId(a.id_alumno)}
+                    >
+                      Ver legajo
+                    </button>
+                    <button
+                      className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                      onClick={() => abrirEditar(a)}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      className={
+                        a.activo
+                          ? 'bg-[#E74C3C1A] text-red border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                          : 'bg-[#27AE601A] text-[#27AE60] border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                      }
+                      disabled={cambiandoEstadoId === a.id_alumno}
+                      onClick={() => cambiarEstado(a)}
+                    >
+                      {cambiandoEstadoId === a.id_alumno
+                        ? '...'
+                        : a.activo
+                          ? 'Desactivar'
+                          : 'Activar'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
+            {alumnosFiltrados.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  {q
+                    ? 'No se encontró ningún alumno con ese legajo o DNI.'
+                    : 'No hay alumnos registrados.'}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -1873,6 +2294,11 @@ interface AlumnoLegajo {
   fecha_nacimiento: string | null
   obra_social: string | null
   activo: boolean
+  // TP Metodología II · RF1
+  legajo: string | null
+  direccion: string | null
+  telefono: string | null
+  email: string | null
   cursos: { nivel: string; grado_anio: string; division: string } | null
 }
 
@@ -1914,7 +2340,7 @@ function LegajoAlumno({
     const { data: al } = await supabase
       .from('alumnos')
       .select(
-        'id_alumno, nombre, apellido, dni, fecha_nacimiento, obra_social, activo, cursos(nivel, grado_anio, division)',
+        'id_alumno, legajo, nombre, apellido, dni, fecha_nacimiento, direccion, telefono, email, obra_social, activo, cursos(nivel, grado_anio, division)',
       )
       .eq('id_alumno', idAlumno)
       .single()
@@ -2069,6 +2495,7 @@ function LegajoAlumno({
               gap: 18,
             }}
           >
+            {dato('Legajo', alumno.legajo ?? '—')}
             {dato('Apellido y nombre', `${alumno.apellido}, ${alumno.nombre}`)}
             {dato('DNI', alumno.dni)}
             {dato(
@@ -2085,6 +2512,9 @@ function LegajoAlumno({
                 ? `${alumno.cursos.nivel} — ${alumno.cursos.grado_anio} "${alumno.cursos.division}"`
                 : 'Sin asignar',
             )}
+            {dato('Domicilio', alumno.direccion ?? '—')}
+            {dato('Teléfono', alumno.telefono ?? '—')}
+            {dato('Correo electrónico', alumno.email ?? '—')}
             {dato('Obra social', alumno.obra_social ?? '—')}
             {dato('Estado', alumno.activo ? 'Activo' : 'Inactivo')}
           </div>
@@ -4621,6 +5051,12 @@ function GestionInscripciones({
                       ` · Nac: ${new Date(
                         i.fecha_nacimiento_aspirante,
                       ).toLocaleDateString('es-AR')}`}
+                    {i.direccion_aspirante && (
+                      <>
+                        <br />
+                        {i.direccion_aspirante}
+                      </>
+                    )}
                   </span>
                 </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
@@ -4681,7 +5117,13 @@ function GestionInscripciones({
                               dni: i.dni_aspirante,
                               fecha_nacimiento:
                                 i.fecha_nacimiento_aspirante ?? '',
+                              direccion: i.direccion_aspirante ?? '',
+                              // Contacto del tutor = contacto del alumno
+                              telefono: i.telefono_tutor ?? '',
+                              email: i.email_tutor,
+                              nivel: i.nivel_solicitado,
                             },
+                            id_inscripcion: i.id_inscripcion,
                           })
                         }}
                       >

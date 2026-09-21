@@ -1030,6 +1030,7 @@ function InscripcionForm() {
     apellido_aspirante: '',
     fecha_nacimiento_aspirante: '',
     dni_aspirante: '',
+    direccion_aspirante: '',
     nombre_tutor: '',
     email_tutor: '',
     telefono_tutor: '',
@@ -1096,6 +1097,10 @@ function InscripcionForm() {
           if (digitos.length < 7 || digitos.length > 15)
             return 'El teléfono debe tener entre 7 y 15 dígitos.'
         }
+        return null
+      case 'direccion_aspirante':
+        if (v.length < 5)
+          return 'Ingresá el domicilio del aspirante (calle y número).'
         return null
       case 'nivel_solicitado':
         if (!valor) return 'Elegí el nivel solicitado.'
@@ -1240,6 +1245,23 @@ function InscripcionForm() {
           />
           <ErrorCampo name='fecha_nacimiento_aspirante' />
         </div>
+      </div>
+      <div>
+        <label className={labelCls}>Domicilio</label>
+        <input
+          name='direccion_aspirante'
+          required
+          value={form.direccion_aspirante}
+          onChange={handleChange}
+          onBlur={handleBlur}
+          placeholder='Av. Sarmiento 1234, Resistencia'
+          className={campoCls('direccion_aspirante')}
+        />
+        {errores.direccion_aspirante && (
+          <p className='text-[11px] text-red font-bold mt-[5px]'>
+            {errores.direccion_aspirante}
+          </p>
+        )}
       </div>
       <div>
         <label className={labelCls}>Nombre del tutor / padre</label>
