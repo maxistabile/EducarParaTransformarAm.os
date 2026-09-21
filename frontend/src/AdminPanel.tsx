@@ -69,10 +69,19 @@ interface Alumno {
 
 interface Docente {
   id_docente: number
-  dni: string
+  dni: string | null
   especialidad: string | null
   activo: boolean
-  usuarios: { nombre: string; apellido: string; email: string } | null
+  usuarios: {
+    nombre: string
+    apellido: string
+    email: string
+    telefono?: string | null
+  } | null
+  // TP Metodología II · RF2
+  id_usuario?: string | null
+  legajo?: string | null
+  titulo?: string | null
 }
 
 interface Curso {
@@ -963,6 +972,8 @@ function GestionUsuarios({
     number | null
   >(null)
   const [nivelSolicitado, setNivelSolicitado] = useState('')
+  // TP Metodología II · RF2.1 — datos del docente al registrarlo
+  const [docenteForm, setDocenteForm] = useState<FormDocente>(DOCENTE_VACIO)
   const [msg, setMsg] = useState('')
 
   const load = useCallback(async () => {
@@ -1131,9 +1142,10 @@ function GestionUsuarios({
     const { error: docErr } = await supabase.from('docentes').insert([
       {
         id_usuario: idUsuario,
-        // dni va NULL (no ''): la columna es UNIQUE y '' chocaría entre
-        // docentes sin DNI cargado.
-        dni: null,
+        // TP Metodología II · RF2.1 (el legajo lo asigna la base)
+        dni: docenteForm.dni.trim(),
+        especialidad: docenteForm.especialidad.trim(),
+        titulo: docenteForm.titulo.trim() || null,
         activo: true,
       },
     ])
@@ -1141,8 +1153,16 @@ function GestionUsuarios({
       return {
         error:
           '⚠️ Usuario creado, pero no se pudo registrar en Docentes: ' +
-          docErr.message,
+          mensajeErrorDocente(docErr.message),
       }
+    }
+    // El teléfono del docente vive en `usuarios` (columna ya existente)
+    const tel = docenteForm.telefono.trim()
+    if (tel && idUsuario) {
+      await supabase
+        .from('usuarios')
+        .update({ telefono: tel })
+        .eq('id_usuario', idUsuario)
     }
     return { error: null }
   }
@@ -1180,6 +1200,26 @@ function GestionUsuarios({
         setMsg(
           `Ya existe el usuario ${dni}@alumno.local. Revisalo en la lista antes de registrar.`,
         )
+        setLoading(false)
+        return
+      }
+    }
+
+    // TP Metodología II · RF2.1 — mismo criterio para el docente
+    if (form.rol === 'Docente') {
+      const errDocente = validarDocente(docenteForm)
+      if (errDocente) {
+        setMsg(errDocente)
+        setLoading(false)
+        return
+      }
+      const { data: dniExiste } = await supabase
+        .from('docentes')
+        .select('id_docente')
+        .eq('dni', docenteForm.dni.trim())
+        .maybeSingle()
+      if (dniExiste) {
+        setMsg('Ya existe un docente registrado con ese DNI.')
         setLoading(false)
         return
       }
@@ -1233,6 +1273,7 @@ function GestionUsuarios({
     setAlumnoForm(ALUMNO_VACIO)
     setIdInscripcionOrigen(null)
     setNivelSolicitado('')
+    setDocenteForm(DOCENTE_VACIO)
     setShowForm(false)
     load()
     setLoading(false)
@@ -1266,6 +1307,7 @@ function GestionUsuarios({
             if (showForm) {
               setIdInscripcionOrigen(null)
               setNivelSolicitado('')
+              setDocenteForm(DOCENTE_VACIO)
             }
             setShowForm(!showForm)
           }}
@@ -1543,6 +1585,99 @@ function GestionUsuarios({
               </div>
             )}
 
+            {form.rol === 'Docente' && (
+              <div
+                style={{
+                  gridColumn: '1/-1',
+                  borderTop: `1px solid ${'#E8E6F5'}`,
+                  paddingTop: 16,
+                  marginTop: 4,
+                }}
+              >
+                <div className='text-[15px] font-extrabold text-text mb-5'>
+                  Datos del docente
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: 14,
+                  }}
+                >
+                  <div>
+                    <span className={LABEL_CLASS}>DNI</span>
+                    <input
+                      className={INPUT_CLASS}
+                      required
+                      placeholder='Sin puntos'
+                      value={docenteForm.dni}
+                      onChange={(e) =>
+                        setDocenteForm((prev) => ({
+                          ...prev,
+                          dni: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <span className={LABEL_CLASS}>Especialidad</span>
+                    <input
+                      className={INPUT_CLASS}
+                      required
+                      placeholder='Ej: Matemática'
+                      value={docenteForm.especialidad}
+                      onChange={(e) =>
+                        setDocenteForm((prev) => ({
+                          ...prev,
+                          especialidad: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <span className={LABEL_CLASS}>Título</span>
+                    <input
+                      className={INPUT_CLASS}
+                      placeholder='Opcional'
+                      value={docenteForm.titulo}
+                      onChange={(e) =>
+                        setDocenteForm((prev) => ({
+                          ...prev,
+                          titulo: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <span className={LABEL_CLASS}>Teléfono</span>
+                    <input
+                      className={INPUT_CLASS}
+                      placeholder='Ej: 362 4123456'
+                      value={docenteForm.telefono}
+                      onChange={(e) =>
+                        setDocenteForm((prev) => ({
+                          ...prev,
+                          telefono: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div
+                  style={{
+                    marginTop: 12,
+                    fontSize: 12,
+                    color: '#6B6B8A',
+                    background: '#EEE9FF',
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                  }}
+                >
+                  El legajo del docente se asigna automáticamente al registrarlo.
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'flex', alignItems: 'flex-end' }}>
               <button
                 type='submit'
@@ -1706,6 +1841,51 @@ function mensajeErrorAlumno(raw: string): string {
     return 'El curso seleccionado no tiene cupo disponible.'
   if (/Could not find the '(legajo|telefono|email)' column/i.test(raw))
     return 'Falta correr la migración etapa9_modulo_alumnos.sql en Supabase.'
+  return 'Error: ' + raw
+}
+
+// TP Metodología II · RF2 — formulario y validaciones del módulo Profesores
+// (reutiliza las mismas expresiones que el módulo Alumnos)
+const DOCENTE_VACIO = { dni: '', especialidad: '', titulo: '', telefono: '' }
+type FormDocente = typeof DOCENTE_VACIO
+
+function validarDocente(
+  f: FormDocente & { nombre?: string; apellido?: string },
+): string | null {
+  // nombre y apellido solo se validan al editar (al registrar vienen
+  // del formulario de Usuarios)
+  if (f.nombre !== undefined) {
+    const n = f.nombre.trim()
+    if (n.length < 2 || !RX_SOLO_LETRAS.test(n))
+      return 'El nombre debe tener al menos 2 caracteres y solo letras.'
+  }
+  if (f.apellido !== undefined) {
+    const a = f.apellido.trim()
+    if (a.length < 2 || !RX_SOLO_LETRAS.test(a))
+      return 'El apellido debe tener al menos 2 caracteres y solo letras.'
+  }
+  if (!/^\d{7,9}$/.test(f.dni.trim()))
+    return 'El DNI debe tener entre 7 y 9 dígitos numéricos (sin puntos).'
+  if (f.especialidad.trim().length < 3)
+    return 'Ingresá la especialidad del docente.'
+  const tel = f.telefono.trim()
+  if (tel) {
+    if (!RX_TEL.test(tel))
+      return 'El teléfono solo puede tener números, espacios y los signos + - ( ).'
+    const digitos = tel.replace(/\D/g, '')
+    if (digitos.length < 7 || digitos.length > 15)
+      return 'El teléfono debe tener entre 7 y 15 dígitos.'
+  }
+  return null
+}
+
+function mensajeErrorDocente(raw: string): string {
+  if (/docentes_dni_key/i.test(raw))
+    return 'Ya existe un docente registrado con ese DNI.'
+  if (/uq_docentes_legajo/i.test(raw))
+    return 'Ya existe un docente con ese legajo.'
+  if (/Could not find the 'legajo' column/i.test(raw))
+    return 'Falta correr la migración etapa11_modulo_profesores.sql en Supabase.'
   return 'Error: ' + raw
 }
 
@@ -2819,16 +2999,145 @@ function LegajoAlumno({
 // ═══════════════════════════════════════════════════════════════
 function GestionDocentes() {
   const [docentes, setDocentes] = useState<Docente[]>([])
+  // TP Metodología II · RF2.2 / RF2.3 / RF2.4
+  const [busqueda, setBusqueda] = useState('')
+  const [editId, setEditId] = useState<number | null>(null)
+  const [form, setForm] = useState({
+    ...DOCENTE_VACIO,
+    nombre: '',
+    apellido: '',
+  })
+  const [guardando, setGuardando] = useState(false)
+  const [cambiandoEstadoId, setCambiandoEstadoId] = useState<number | null>(
+    null,
+  )
+  const [msg, setMsg] = useState('')
 
+  const consultarDocentes = useCallback(
+    () =>
+      supabase
+        .from('docentes')
+        .select('*, usuarios(nombre, apellido, email, telefono)')
+        .order('id_docente'),
+    [],
+  )
+  const load = useCallback(async () => {
+    const { data } = await consultarDocentes()
+    if (data) setDocentes(data as unknown as Docente[])
+  }, [consultarDocentes])
+
+  // Carga inicial con el mismo patrón que tenía la versión original
   useEffect(() => {
-    supabase
+    consultarDocentes().then(({ data }) => {
+      if (data) setDocentes(data as unknown as Docente[])
+    })
+  }, [consultarDocentes])
+
+  // RF2.3 — Cargar los datos del docente en el formulario
+  const abrirEditar = (d: Docente) => {
+    setEditId(d.id_docente)
+    setForm({
+      nombre: d.usuarios?.nombre ?? '',
+      apellido: d.usuarios?.apellido ?? '',
+      dni: d.dni ?? '',
+      especialidad: d.especialidad ?? '',
+      titulo: d.titulo ?? '',
+      telefono: d.usuarios?.telefono ?? '',
+    })
+    setMsg('')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // RF2.3 — Modificar los datos del docente
+  const guardar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (editId === null) return
+    setMsg('')
+    const errorValidacion = validarDocente(form)
+    if (errorValidacion) {
+      setMsg(errorValidacion)
+      return
+    }
+    const d = docentes.find((x) => x.id_docente === editId)
+    setGuardando(true)
+    const { error: errDoc } = await supabase
       .from('docentes')
-      .select('*, usuarios(nombre, apellido, email)')
-      .order('id_docente')
-      .then(({ data }) => {
-        if (data) setDocentes(data as unknown as Docente[])
+      .update({
+        dni: form.dni.trim(),
+        especialidad: form.especialidad.trim(),
+        titulo: form.titulo.trim() || null,
       })
-  }, [])
+      .eq('id_docente', editId)
+    if (errDoc) {
+      setMsg(mensajeErrorDocente(errDoc.message))
+      setGuardando(false)
+      return
+    }
+    // Nombre, apellido y teléfono viven en `usuarios`. El email no se edita
+    // acá porque es el usuario con el que el docente entra al sistema.
+    if (d?.id_usuario) {
+      const { error: errUsr } = await supabase
+        .from('usuarios')
+        .update({
+          nombre: form.nombre.trim(),
+          apellido: form.apellido.trim(),
+          telefono: form.telefono.trim() || null,
+        })
+        .eq('id_usuario', d.id_usuario)
+      if (errUsr) {
+        setMsg(
+          '⚠️ Se guardaron los datos del docente, pero no los de contacto: ' +
+            errUsr.message,
+        )
+        setGuardando(false)
+        load()
+        return
+      }
+    }
+    setGuardando(false)
+    setMsg('✅ Datos del docente actualizados.')
+    setEditId(null)
+    load()
+  }
+
+  // RF2.4 — Cambiar el estado del docente (activo / inactivo)
+  const cambiarEstado = async (d: Docente) => {
+    const nombre = `${d.usuarios?.apellido ?? ''}, ${d.usuarios?.nombre ?? ''}`
+    const aviso = d.activo
+      ? '\nMientras esté inactivo no va a poder recibir nuevas asignaciones.'
+      : ''
+    if (
+      !confirm(
+        `¿Seguro que querés ${d.activo ? 'desactivar' : 'activar'} a ${nombre}?${aviso}`,
+      )
+    )
+      return
+    setCambiandoEstadoId(d.id_docente)
+    setMsg('')
+    const { error } = await supabase
+      .from('docentes')
+      .update({ activo: !d.activo })
+      .eq('id_docente', d.id_docente)
+    setCambiandoEstadoId(null)
+    if (error) {
+      setMsg(mensajeErrorDocente(error.message))
+    } else {
+      setMsg(`✅ Docente ${d.activo ? 'desactivado' : 'activado'}.`)
+      load()
+    }
+  }
+
+  // RF2.2 — Consultar por legajo o DNI
+  const q = busqueda.trim().toLowerCase()
+  const docentesFiltrados = q
+    ? docentes.filter(
+        (d) =>
+          (d.legajo ?? '').toLowerCase().includes(q) ||
+          (d.dni ?? '').toLowerCase().includes(q),
+      )
+    : docentes
+  const docenteEditando =
+    editId !== null ? docentes.find((x) => x.id_docente === editId) : null
 
   return (
     <div>
@@ -2837,20 +3146,190 @@ function GestionDocentes() {
       </h2>
       <div className='bg-white rounded-card p-6 shadow-card border border-border mb-3'>
         <p style={{ fontSize: 13, color: '#6B6B8A', margin: 0 }}>
-          Para agregar docentes, primero creá el usuario desde{' '}
-          <strong>Usuarios</strong> con rol <strong>Docente</strong>. El
-          registro en esta tabla se crea automáticamente.
+          Para agregar docentes, creá el usuario desde{' '}
+          <strong>Usuarios</strong> con rol <strong>Docente</strong> y completá
+          sus datos. Desde acá podés consultarlos, editarlos y cambiar su
+          estado.
         </p>
       </div>
+
+      {editId !== null && (
+        <div className='bg-white rounded-card p-6 shadow-card border border-border mb-3'>
+          <div className='text-[15px] font-extrabold text-text mb-5'>
+            Editar docente
+          </div>
+          <form
+            onSubmit={guardar}
+            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}
+          >
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Legajo
+              </span>
+              <div className='text-[13px] font-extrabold text-purple-700'>
+                {docenteEditando?.legajo ?? '—'}
+              </div>
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Email (usuario de acceso)
+              </span>
+              <div className='text-[13px] text-textMuted'>
+                {docenteEditando?.usuarios?.email ?? '—'}
+              </div>
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Nombre
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                required
+                value={form.nombre}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, nombre: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Apellido
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                required
+                value={form.apellido}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, apellido: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                DNI
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                required
+                placeholder='Sin puntos'
+                value={form.dni}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, dni: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Especialidad
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                required
+                value={form.especialidad}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, especialidad: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Título
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                placeholder='Opcional'
+                value={form.titulo}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, titulo: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Teléfono
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                placeholder='Ej: 362 4123456'
+                value={form.telefono}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, telefono: e.target.value }))
+                }
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 10, gridColumn: '1/-1' }}>
+              <button
+                type='submit'
+                disabled={guardando}
+                className={
+                  guardando
+                    ? 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer opacity-60'
+                    : 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+                }
+              >
+                {guardando ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+              <button
+                type='button'
+                className='bg-[#E74C3C1A] text-red border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+                onClick={() => setEditId(null)}
+              >
+                Cancelar
+              </button>
+            </div>
+            {msg && (
+              <div
+                style={{
+                  gridColumn: '1/-1',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+                }}
+              >
+                {msg}
+              </div>
+            )}
+          </form>
+        </div>
+      )}
+
+      {editId === null && msg && (
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            marginBottom: 14,
+            color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+          }}
+        >
+          {msg}
+        </div>
+      )}
+
       <div className='bg-white rounded-card p-6 shadow-card border border-border'>
+        <input
+          className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border mb-4'
+          placeholder='🔍 Buscar por legajo o DNI'
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+        />
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
               <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
+                Legajo
+              </th>
+              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
                 Docente
               </th>
               <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
+                DNI
+              </th>
+              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
                 Email
+              </th>
+              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
+                Teléfono
               </th>
               <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
                 Especialidad
@@ -2858,18 +3337,32 @@ function GestionDocentes() {
               <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
                 Estado
               </th>
+              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
+                Acciones
+              </th>
             </tr>
           </thead>
           <tbody>
-            {docentes.map((d) => (
+            {docentesFiltrados.map((d) => (
               <tr key={d.id_docente}>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle font-extrabold text-purple-700'>
+                  {d.legajo ?? '—'}
+                </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle font-bold'>
                   {d.usuarios?.apellido}, {d.usuarios?.nombre}
                 </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
+                  {d.dni ?? (
+                    <span style={badge('#E67E22')}>Falta DNI</span>
+                  )}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
                   {d.usuarios?.email}
                 </td>
-                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
+                  {d.usuarios?.telefono ?? '—'}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
                   {d.especialidad ?? '—'}
                 </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
@@ -2877,15 +3370,51 @@ function GestionDocentes() {
                     {d.activo ? 'Activo' : 'Inactivo'}
                   </span>
                 </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  <div className='flex items-center gap-2'>
+                    <button
+                      className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                      onClick={() => abrirEditar(d)}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      className={
+                        d.activo
+                          ? 'bg-[#E74C3C1A] text-red border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                          : 'bg-[#27AE601A] text-[#27AE60] border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                      }
+                      disabled={cambiandoEstadoId === d.id_docente}
+                      onClick={() => cambiarEstado(d)}
+                    >
+                      {cambiandoEstadoId === d.id_docente
+                        ? '...'
+                        : d.activo
+                          ? 'Desactivar'
+                          : 'Activar'}
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
+            {docentesFiltrados.length === 0 && (
+              <tr>
+                <td
+                  colSpan={8}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  {q
+                    ? 'No se encontró ningún docente con ese legajo o DNI.'
+                    : 'No hay docentes registrados.'}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
     </div>
   )
 }
-
 // ═══════════════════════════════════════════════════════════════
 //  GESTIÓN DE CURSOS
 // ═══════════════════════════════════════════════════════════════

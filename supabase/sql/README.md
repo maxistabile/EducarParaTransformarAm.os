@@ -12,6 +12,7 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa5_legajo_documentos.sql` | R1, R3 | Tabla `documentos_alumno` |
 | `etapa9_modulo_alumnos.sql` | TP Met. II · RF1 (HU7–HU10) | Legajo automático, teléfono y email en `alumnos` (domicilio = `direccion`, ya existía) + ajuste de `trg_cupo_curso` al reactivar |
 | `etapa10_inscripcion_alumno.sql` | TP Met. II · RF1.1 | `direccion_aspirante` en `inscripciones`: la preinscripción pide el domicilio |
+| `etapa11_modulo_profesores.sql` | TP Met. II · RF2 (HU11–HU14) | Legajo automático en `docentes` (teléfono = `usuarios.telefono`, ya existía) |
 
 ## Pasos manuales adicionales
 
