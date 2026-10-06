@@ -295,9 +295,11 @@ const NAV_ADMIN = [
   { key: 'usuarios', icon: '👥', label: 'Usuarios' },
   { key: 'alumnos', icon: '🎓', label: 'Alumnos' },
   { key: 'docentes', icon: '👨‍🏫', label: 'Docentes' },
+  { key: 'niveles', icon: '🎚️', label: 'Niveles' },
   { key: 'cursos', icon: '🏫', label: 'Cursos' },
   { key: 'materias', icon: '📚', label: 'Materias' },
   { key: 'asignaciones', icon: '🔗', label: 'Asignaciones' },
+  { key: 'horarios', icon: '🕐', label: 'Horarios' },
   { key: 'cuotas', icon: '💳', label: 'Cuotas' },
   { key: 'pagos', icon: '💰', label: 'Registrar pagos' },
   { key: 'becas', icon: '🎟️', label: 'Becas' },
@@ -582,9 +584,11 @@ export default function AdminPanel() {
           )}
           {activeNav === 'alumnos' && esAdmin && <GestionAlumnos />}
           {activeNav === 'docentes' && esAdmin && <GestionDocentes />}
+          {activeNav === 'niveles' && esAdmin && <GestionNiveles />}
           {activeNav === 'cursos' && esAdmin && <GestionCursos />}
           {activeNav === 'materias' && esAdmin && <GestionMaterias />}
           {activeNav === 'asignaciones' && esAdmin && <GestionAsignaciones />}
+          {activeNav === 'horarios' && esAdmin && <GestionHorarios />}
           {activeNav === 'cuotas' && esAdmin && <GestionCuotas />}
           {activeNav === 'pagos' && esAdmin && <RegistrarPagos />}
           {activeNav === 'becas' && esAdmin && <GestionBecas />}
@@ -3416,56 +3420,579 @@ function GestionDocentes() {
   )
 }
 // ═══════════════════════════════════════════════════════════════
+//  TP METODOLOGÍA II · RF3 — Estructura académica de la institución
+//  Solo existen tres niveles, cada uno con sus grados fijos.
+// ═══════════════════════════════════════════════════════════════
+const NIVELES_INSTITUCION = ['Inicial', 'Primario', 'Secundario']
+const GRADOS_POR_NIVEL: Record<string, string[]> = {
+  Inicial: ['Sala de 3', 'Sala de 4', 'Sala de 5'],
+  Primario: [
+    '1er grado',
+    '2do grado',
+    '3er grado',
+    '4to grado',
+    '5to grado',
+    '6to grado',
+    '7mo grado',
+  ],
+  Secundario: ['1er año', '2do año', '3er año', '4to año', '5to año'],
+}
+// Mismos valores que admite la restricción de la tabla `horarios`
+const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']
+
+// Misma comparación que hace la base (fn_texto_normalizado): unifica la
+// forma de la ñ y las tildes, los espacios (incluido el espacio "duro" que
+// viene de Word) e ignora mayúsculas. Textos que se ven iguales, son iguales.
+const limpiarTexto = (t: string) =>
+  t.normalize('NFC').replace(/\u200b/g, '').replace(/\s+/g, ' ').trim()
+const normalizarTexto = (t: string) => limpiarTexto(t).toLowerCase()
+
+const indiceGrado = (nivel: string, grado: string) =>
+  (GRADOS_POR_NIVEL[nivel] ?? []).findIndex(
+    (g) => normalizarTexto(g) === normalizarTexto(grado),
+  )
+const esGradoEstandar = (nivel: string, grado: string) =>
+  indiceGrado(nivel, grado) !== -1
+const colorNivel = (nivel: string) =>
+  nivel === 'Inicial' ? '#27AE60' : nivel === 'Primario' ? '#2980B9' : '#5B35C5'
+
+interface Nivel {
+  id_nivel: number
+  nombre: string
+  descripcion: string | null
+  orden: number
+  activo: boolean
+}
+
+function validarCurso(
+  f: {
+    nivel: string
+    grado_anio: string
+    division: string
+    capacidad_maxima: string
+  },
+  alumnosActivos: number | null,
+): string | null {
+  if (!f.nivel) return 'Elegí el nivel del curso.'
+  if (!f.grado_anio.trim()) return 'Elegí el grado o año del curso.'
+  if (!/^[A-Za-z0-9]{1,3}$/.test(f.division.trim()))
+    return 'La división debe tener entre 1 y 3 letras o números (ej: A).'
+  const cap = Number(f.capacidad_maxima)
+  if (!Number.isInteger(cap) || cap < 1 || cap > 100)
+    return 'La capacidad debe ser un número entero entre 1 y 100.'
+  if (alumnosActivos !== null && cap < alumnosActivos)
+    return `La capacidad no puede ser menor a los ${alumnosActivos} alumnos activos del curso.`
+  return null
+}
+
+function validarMateria(f: {
+  nombre: string
+  horas_semanales: string
+}): string | null {
+  if (f.nombre.trim().length < 3)
+    return 'El nombre de la materia debe tener al menos 3 caracteres.'
+  const h = Number(f.horas_semanales)
+  if (!Number.isInteger(h) || h < 1 || h > 40)
+    return 'Las horas semanales deben ser un número entero entre 1 y 40.'
+  return null
+}
+
+function validarHorario(f: {
+  id_asignacion: string
+  dia_semana: string
+  hora_inicio: string
+  hora_fin: string
+}): string | null {
+  if (!f.id_asignacion)
+    return 'Elegí la asignación (curso, materia y docente).'
+  if (!DIAS_SEMANA.includes(f.dia_semana)) return 'Elegí el día de la semana.'
+  if (!f.hora_inicio || !f.hora_fin)
+    return 'Completá la hora de inicio y la de fin.'
+  if (f.hora_fin <= f.hora_inicio)
+    return 'La hora de fin tiene que ser posterior a la de inicio.'
+  return null
+}
+
+// Traduce los errores de la base a mensajes claros para el usuario
+function mensajeErrorAcademico(raw: string): string {
+  if (/niveles_nombre_check/i.test(raw))
+    return 'Solo existen los niveles Inicial, Primario y Secundario.'
+  if (/niveles_nombre_key/i.test(raw)) return 'Ese nivel ya está registrado.'
+  if (/fk_cursos_nivel/i.test(raw))
+    return 'El nivel elegido no está registrado.'
+  if (/uq_cursos_nivel_grado_div/i.test(raw))
+    return 'Ya existe un curso con ese nivel, grado y división.'
+  if (/uq_materias_nombre/i.test(raw))
+    return 'Ya existe una materia con ese nombre.'
+  if (/uq_asignaciones_doc_mat_cur/i.test(raw))
+    return 'Ese docente ya tiene asignada esa materia en ese curso.'
+  const choque = raw.match(/Superposicion de horario: (.*)/i)
+  if (choque) return 'El horario se superpone: ' + choque[1] + '.'
+  if (/chk_horarios_fin_mayor/i.test(raw))
+    return 'La hora de fin tiene que ser posterior a la de inicio.'
+  if (/fn_texto_normalizado/i.test(raw))
+    return 'Falta correr la migración etapa13_correccion_duplicados.sql en Supabase.'
+  if (/niveles.*(does not exist|schema cache)/i.test(raw))
+    return 'Falta correr la migración etapa12_modulo_academico.sql en Supabase.'
+  return 'Error: ' + raw
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NIVELES EDUCATIVOS (RF3.1, RF3.2)
+// ═══════════════════════════════════════════════════════════════
+async function cargarNiveles() {
+  const [{ data: nv, error }, { data: cu }] = await Promise.all([
+    supabase.from('niveles').select('*').order('orden'),
+    supabase.from('cursos').select('nivel').eq('activo', true),
+  ])
+  const conteo: Record<string, number> = {}
+  ;(cu ?? []).forEach((c: { nivel: string }) => {
+    conteo[c.nivel] = (conteo[c.nivel] ?? 0) + 1
+  })
+  return {
+    niveles: (nv ?? []) as Nivel[],
+    conteo,
+    error: error ? error.message : null,
+  }
+}
+
+function GestionNiveles() {
+  const [niveles, setNiveles] = useState<Nivel[]>([])
+  const [cursosPorNivel, setCursosPorNivel] = useState<
+    Record<string, number>
+  >({})
+  const [modo, setModo] = useState<'cerrado' | 'nuevo' | 'editar'>('cerrado')
+  const [editId, setEditId] = useState<number | null>(null)
+  const [form, setForm] = useState({ nombre: '', descripcion: '', activo: true })
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const aplicar = useCallback(
+    (r: Awaited<ReturnType<typeof cargarNiveles>>) => {
+      setNiveles(r.niveles)
+      setCursosPorNivel(r.conteo)
+      if (r.error) setMsg(mensajeErrorAcademico(r.error))
+    },
+    [],
+  )
+  const load = () => cargarNiveles().then(aplicar)
+
+  useEffect(() => {
+    cargarNiveles().then(aplicar)
+  }, [aplicar])
+
+  // RF3.1 — Solo se pueden registrar los niveles de la institución que falten
+  const faltantes = NIVELES_INSTITUCION.filter(
+    (n) => !niveles.some((x) => x.nombre === n),
+  )
+
+  const abrirNuevo = () => {
+    setForm({ nombre: faltantes[0] ?? '', descripcion: '', activo: true })
+    setEditId(null)
+    setMsg('')
+    setModo('nuevo')
+  }
+
+  const abrirEditar = (n: Nivel) => {
+    setForm({
+      nombre: n.nombre,
+      descripcion: n.descripcion ?? '',
+      activo: n.activo,
+    })
+    setEditId(n.id_nivel)
+    setMsg('')
+    setModo('editar')
+  }
+
+  const guardar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setMsg('')
+    if (!NIVELES_INSTITUCION.includes(form.nombre)) {
+      setMsg('Solo existen los niveles Inicial, Primario y Secundario.')
+      return
+    }
+    setGuardando(true)
+    const datos = {
+      descripcion: form.descripcion.trim() || null,
+      activo: form.activo,
+    }
+    const { error } =
+      modo === 'editar' && editId !== null
+        ? // RF3.2 — Modificar el nivel (el nombre es fijo)
+          await supabase.from('niveles').update(datos).eq('id_nivel', editId)
+        : await supabase.from('niveles').insert([
+            {
+              ...datos,
+              nombre: form.nombre,
+              orden: NIVELES_INSTITUCION.indexOf(form.nombre) + 1,
+            },
+          ])
+    setGuardando(false)
+    if (error) {
+      setMsg(mensajeErrorAcademico(error.message))
+      return
+    }
+    setMsg(modo === 'editar' ? '✅ Nivel actualizado.' : '✅ Nivel registrado.')
+    setModo('cerrado')
+    load()
+  }
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
+          🎚️ Niveles educativos
+        </h2>
+        {faltantes.length > 0 && (
+          <button
+            className='bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+            onClick={() => (modo === 'cerrado' ? abrirNuevo() : setModo('cerrado'))}
+          >
+            {modo === 'cerrado' ? '+ Registrar nivel' : 'Cancelar'}
+          </button>
+        )}
+      </div>
+
+      <div className='bg-white rounded-card p-6 shadow-card border border-border mb-3'>
+        <p style={{ fontSize: 13, color: '#6B6B8A', margin: 0 }}>
+          La institución tiene tres niveles: <strong>Inicial</strong> (salas
+          de 3, 4 y 5), <strong>Primario</strong> (1er a 7mo grado) y{' '}
+          <strong>Secundario</strong> (1er a 5to año). Si un nivel se
+          desactiva, no se pueden crear cursos nuevos en él.
+        </p>
+      </div>
+
+      {modo !== 'cerrado' && (
+        <div className='bg-white rounded-card p-6 shadow-card border border-border mb-3'>
+          <div className='text-[15px] font-extrabold text-text mb-5'>
+            {modo === 'editar' ? 'Editar nivel' : 'Registrar nivel'}
+          </div>
+          <form
+            onSubmit={guardar}
+            style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14 }}
+          >
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Nivel
+              </span>
+              {modo === 'editar' ? (
+                <div className='text-[13px] font-extrabold text-purple-700 py-[10px]'>
+                  {form.nombre}
+                </div>
+              ) : (
+                <select
+                  className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border appearance-none'
+                  required
+                  value={form.nombre}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, nombre: e.target.value }))
+                  }
+                >
+                  {faltantes.map((n) => (
+                    <option key={n}>{n}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
+                Descripción
+              </span>
+              <input
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                value={form.descripcion}
+                placeholder='Ej: De 1er grado a 7mo grado'
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, descripcion: e.target.value }))
+                }
+              />
+            </div>
+            <label
+              style={{ gridColumn: '1/-1' }}
+              className='flex items-center gap-2 text-[13px] text-text cursor-pointer'
+            >
+              <input
+                type='checkbox'
+                checked={form.activo}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, activo: e.target.checked }))
+                }
+              />
+              Nivel activo
+            </label>
+            <div style={{ gridColumn: '1/-1' }}>
+              <button
+                type='submit'
+                disabled={guardando}
+                className={
+                  guardando
+                    ? 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer opacity-60'
+                    : 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+                }
+              >
+                {guardando
+                  ? 'Guardando...'
+                  : modo === 'editar'
+                    ? 'Guardar cambios'
+                    : 'Registrar nivel'}
+              </button>
+              {modo === 'editar' && (
+                <button
+                  type='button'
+                  className='ml-2 bg-[#E74C3C1A] text-red border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+                  onClick={() => setModo('cerrado')}
+                >
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
+
+      {msg && (
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            marginBottom: 14,
+            color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+          }}
+        >
+          {msg}
+        </div>
+      )}
+
+      <div className='bg-white rounded-card p-6 shadow-card border border-border'>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['Nivel', 'Descripción', 'Grados', 'Cursos activos', 'Estado', 'Acciones'].map(
+                (t) => (
+                  <th
+                    key={t}
+                    className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'
+                  >
+                    {t}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {niveles.map((n) => (
+              <tr key={n.id_nivel}>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  <span style={badge(colorNivel(n.nombre))}>{n.nombre}</span>
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
+                  {n.descripcion ?? '—'}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
+                  {(GRADOS_POR_NIVEL[n.nombre] ?? []).join(' · ')}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle font-bold'>
+                  {cursosPorNivel[n.nombre] ?? 0}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  <span style={badge(n.activo ? '#27AE60' : '#E74C3C')}>
+                    {n.activo ? 'Activo' : 'Inactivo'}
+                  </span>
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  <button
+                    className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                    onClick={() => abrirEditar(n)}
+                  >
+                    Editar
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {niveles.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  No hay niveles registrados.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  GESTIÓN DE CURSOS
 // ═══════════════════════════════════════════════════════════════
 function GestionCursos() {
   const [cursos, setCursos] = useState<Curso[]>([])
+  const [niveles, setNiveles] = useState<Nivel[]>([])
   const [showForm, setShowForm] = useState(false)
+  // TP Metodología II · RF3.4 — edición de cursos
+  const [editId, setEditId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
-  const [form, setForm] = useState({
-    nivel: 'Inicial',
+  const CURSO_VACIO = {
+    nivel: '',
     grado_anio: '',
     division: 'A',
     capacidad_maxima: '30',
-  })
+  }
+  const [form, setForm] = useState(CURSO_VACIO)
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('cursos')
-      .select('*')
-      .eq('activo', true)
-      .order('nivel')
-    if (data) setCursos(data as Curso[])
+    const [{ data: cu }, { data: nv }] = await Promise.all([
+      supabase.from('cursos').select('*').eq('activo', true).order('nivel'),
+      supabase.from('niveles').select('*').eq('activo', true).order('orden'),
+    ])
+    if (cu) setCursos(cu as Curso[])
+    if (nv) setNiveles(nv as Nivel[])
   }, [])
 
   useEffect(() => {
     load()
   }, [load])
 
+
+  // Orden: nivel → grado (según la lista fija) → división
+  const cursosOrdenados = [...cursos].sort((a, b) => {
+    const n =
+      NIVELES_INSTITUCION.indexOf(a.nivel) - NIVELES_INSTITUCION.indexOf(b.nivel)
+    if (n !== 0) return n
+    const ga = indiceGrado(a.nivel, a.grado_anio)
+    const gb = indiceGrado(b.nivel, b.grado_anio)
+    const g = (ga === -1 ? 99 : ga) - (gb === -1 ? 99 : gb)
+    if (g !== 0) return g
+    return a.division.localeCompare(b.division)
+  })
+
+  const cursoEditando =
+    editId !== null ? cursos.find((c) => c.id_curso === editId) : null
+  // Niveles activos registrados; si la migración todavía no se corrió,
+  // se usan los tres de la institución para que la pantalla siga andando.
+  // Al editar un curso de un nivel desactivado, ese nivel se ofrece igual.
+  const nivelesBase = niveles.length
+    ? niveles.map((n) => n.nombre)
+    : NIVELES_INSTITUCION
+  const opcionesNivel =
+    cursoEditando && !nivelesBase.includes(cursoEditando.nivel)
+      ? [...nivelesBase, cursoEditando.nivel]
+      : nivelesBase
+  // Si el curso que se edita tiene el grado escrito a mano, se ofrece igual
+  const opcionesGrado = [
+    ...(GRADOS_POR_NIVEL[form.nivel] ?? []),
+    ...(cursoEditando &&
+    cursoEditando.nivel === form.nivel &&
+    !esGradoEstandar(cursoEditando.nivel, cursoEditando.grado_anio)
+      ? [cursoEditando.grado_anio]
+      : []),
+  ]
+
+  const cerrarForm = () => {
+    setShowForm(false)
+    setEditId(null)
+    setForm(CURSO_VACIO)
+  }
+
+  const abrirNuevo = () => {
+    setEditId(null)
+    setForm({ ...CURSO_VACIO, nivel: opcionesNivel[0] ?? '' })
+    setMsg('')
+    setShowForm(true)
+  }
+
+  const abrirEditar = (c: Curso) => {
+    setEditId(c.id_curso)
+    setForm({
+      nivel: c.nivel,
+      grado_anio: c.grado_anio,
+      division: c.division,
+      capacidad_maxima: String(c.capacidad_maxima),
+    })
+    setMsg('')
+    setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setMsg('')
+    setLoading(true)
+
+    // RF3.4 — al editar, la capacidad no puede quedar por debajo de los
+    // alumnos activos que ya tiene el curso
+    let activos: number | null = null
+    if (editId !== null) {
+      const { count } = await supabase
+        .from('alumnos')
+        .select('id_alumno', { count: 'exact', head: true })
+        .eq('id_curso', editId)
+        .eq('activo', true)
+      activos = count ?? 0
+    }
+    const errorValidacion = validarCurso(form, activos)
+    if (errorValidacion) {
+      setMsg(errorValidacion)
+      setLoading(false)
+      return
+    }
+
+    const datos = {
+      nivel: form.nivel,
+      grado_anio: limpiarTexto(form.grado_anio),
+      division: limpiarTexto(form.division).toUpperCase(),
+      capacidad_maxima: Number(form.capacidad_maxima),
+    }
+
+    // RF3.3 — aviso inmediato si el curso ya existe (la base lo controla igual)
+    const clave = (c: { nivel: string; grado_anio: string; division: string }) =>
+      `${c.nivel}|${normalizarTexto(c.grado_anio)}|${normalizarTexto(c.division)}`
+    if (cursos.some((c) => c.id_curso !== editId && clave(c) === clave(datos))) {
+      setMsg('Ya existe un curso con ese nivel, grado y división.')
+      setLoading(false)
+      return
+    }
+
+    if (editId !== null) {
+      const { error } = await supabase
+        .from('cursos')
+        .update(datos)
+        .eq('id_curso', editId)
+      if (error) setMsg(mensajeErrorAcademico(error.message))
+      else {
+        setMsg('✅ Curso actualizado.')
+        cerrarForm()
+        load()
+      }
+      setLoading(false)
+      return
+    }
+
     // Obtener período activo
     const { data: periodo } = await supabase
       .from('periodos_academicos')
       .select('id_periodo')
       .eq('activo', true)
       .single()
-    const { error } = await supabase.from('cursos').insert([
-      {
-        nivel: form.nivel,
-        grado_anio: form.grado_anio,
-        division: form.division,
-        capacidad_maxima: Number(form.capacidad_maxima),
-        id_periodo: periodo?.id_periodo ?? null,
-      },
-    ])
-    if (error) setMsg('Error: ' + error.message)
+    const { error } = await supabase
+      .from('cursos')
+      .insert([{ ...datos, id_periodo: periodo?.id_periodo ?? null }])
+    if (error) setMsg(mensajeErrorAcademico(error.message))
     else {
       setMsg('✅ Curso creado.')
-      setShowForm(false)
+      cerrarForm()
       load()
     }
     setLoading(false)
@@ -3484,7 +4011,7 @@ function GestionCursos() {
         <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>🏫 Cursos</h2>
         <button
           className='bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => (showForm ? cerrarForm() : abrirNuevo())}
         >
           {showForm ? 'Cancelar' : '+ Nuevo curso'}
         </button>
@@ -3493,7 +4020,7 @@ function GestionCursos() {
       {showForm && (
         <div className='bg-white rounded-card p-6 shadow-card border border-border mb-6'>
           <div className='text-[15px] font-extrabold text-text mb-5'>
-            Crear curso
+            {editId !== null ? 'Editar curso' : 'Crear curso'}
           </div>
           <form
             onSubmit={handleCreate}
@@ -3509,29 +4036,37 @@ function GestionCursos() {
               </span>
               <select
                 className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border appearance-none'
+                required
                 value={form.nivel}
                 onChange={(e) =>
-                  setForm((p) => ({ ...p, nivel: e.target.value }))
+                  // al cambiar de nivel, el grado elegido deja de valer
+                  setForm((p) => ({ ...p, nivel: e.target.value, grado_anio: '' }))
                 }
               >
-                <option>Inicial</option>
-                <option>Primario</option>
-                <option>Secundario</option>
+                {opcionesNivel.map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
               </select>
             </div>
             <div>
               <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
                 Grado / Año
               </span>
-              <input
-                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+              <select
+                className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border appearance-none'
                 required
                 value={form.grado_anio}
-                placeholder='1er Grado'
                 onChange={(e) =>
                   setForm((p) => ({ ...p, grado_anio: e.target.value }))
                 }
-              />
+              >
+                <option value=''>Seleccionar</option>
+                {opcionesGrado.map((g) => (
+                  <option key={g} value={g}>
+                    {esGradoEstandar(form.nivel, g) ? g : `${g} (actual)`}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
@@ -3570,7 +4105,11 @@ function GestionCursos() {
                     : 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
                 }
               >
-                {loading ? 'Guardando...' : 'Crear curso'}
+                {loading
+                  ? 'Guardando...'
+                  : editId !== null
+                    ? 'Guardar cambios'
+                    : 'Crear curso'}
               </button>
             </div>
             {msg && (
@@ -3589,42 +4128,46 @@ function GestionCursos() {
         </div>
       )}
 
+      {!showForm && msg && (
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            marginBottom: 14,
+            color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+          }}
+        >
+          {msg}
+        </div>
+      )}
+
       <div className='bg-white rounded-card p-6 shadow-card border border-border'>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
-                Nivel
-              </th>
-              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
-                Grado / Año
-              </th>
-              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
-                División
-              </th>
-              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
-                Capacidad
-              </th>
+              {['Nivel', 'Grado / Año', 'División', 'Capacidad', 'Acciones'].map(
+                (t) => (
+                  <th
+                    key={t}
+                    className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'
+                  >
+                    {t}
+                  </th>
+                ),
+              )}
             </tr>
           </thead>
           <tbody>
-            {cursos.map((c) => (
+            {cursosOrdenados.map((c) => (
               <tr key={c.id_curso}>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
-                  <span
-                    style={badge(
-                      c.nivel === 'Inicial'
-                        ? '#27AE60'
-                        : c.nivel === 'Primario'
-                          ? '#2980B9'
-                          : '#5B35C5',
-                    )}
-                  >
-                    {c.nivel}
-                  </span>
+                  <span style={badge(colorNivel(c.nivel))}>{c.nivel}</span>
                 </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle font-bold'>
-                  {c.grado_anio}
+                  {c.grado_anio}{' '}
+                  {!esGradoEstandar(c.nivel, c.grado_anio) && (
+                    <span style={badge('#E67E22')}>Revisar grado</span>
+                  )}
                 </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
                   División {c.division}
@@ -3632,8 +4175,26 @@ function GestionCursos() {
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
                   {c.capacidad_maxima} alumnos
                 </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  <button
+                    className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                    onClick={() => abrirEditar(c)}
+                  >
+                    Editar
+                  </button>
+                </td>
               </tr>
             ))}
+            {cursosOrdenados.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  No hay cursos registrados.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -3647,7 +4208,11 @@ function GestionCursos() {
 function GestionMaterias() {
   const [materias, setMaterias] = useState<Materia[]>([])
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ nombre: '', horas_semanales: '4' })
+  // TP Metodología II · RF3.6 — edición de materias
+  const [editId, setEditId] = useState<number | null>(null)
+  const [guardando, setGuardando] = useState(false)
+  const MATERIA_VACIA = { nombre: '', horas_semanales: '4' }
+  const [form, setForm] = useState(MATERIA_VACIA)
   const [msg, setMsg] = useState('')
 
   const load = useCallback(async () => {
@@ -3659,20 +4224,65 @@ function GestionMaterias() {
     load()
   }, [load])
 
+  const cerrarForm = () => {
+    setShowForm(false)
+    setEditId(null)
+    setForm(MATERIA_VACIA)
+  }
+
+  const abrirNuevo = () => {
+    setEditId(null)
+    setForm(MATERIA_VACIA)
+    setMsg('')
+    setShowForm(true)
+  }
+
+  const abrirEditar = (m: Materia) => {
+    setEditId(m.id_materia)
+    setForm({ nombre: m.nombre, horas_semanales: String(m.horas_semanales) })
+    setMsg('')
+    setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setMsg('')
-    const { error } = await supabase
-      .from('materias')
-      .insert([
-        { nombre: form.nombre, horas_semanales: Number(form.horas_semanales) },
-      ])
-    if (error) setMsg('Error: ' + error.message)
-    else {
-      setMsg('✅ Materia creada.')
-      setShowForm(false)
-      load()
+    const errorValidacion = validarMateria(form)
+    if (errorValidacion) {
+      setMsg(errorValidacion)
+      return
     }
+    // RF3.5 — aviso inmediato si la materia ya existe (la base lo controla igual)
+    const nombre = limpiarTexto(form.nombre)
+    if (
+      materias.some(
+        (m) =>
+          m.id_materia !== editId &&
+          normalizarTexto(m.nombre) === normalizarTexto(nombre),
+      )
+    ) {
+      setMsg('Ya existe una materia con ese nombre.')
+      return
+    }
+    setGuardando(true)
+    const datos = {
+      nombre,
+      horas_semanales: Number(form.horas_semanales),
+    }
+    const { error } =
+      editId !== null
+        ? // RF3.6 — Modificar la materia
+          await supabase.from('materias').update(datos).eq('id_materia', editId)
+        : await supabase.from('materias').insert([datos])
+    setGuardando(false)
+    if (error) {
+      setMsg(mensajeErrorAcademico(error.message))
+      return
+    }
+    setMsg(editId !== null ? '✅ Materia actualizada.' : '✅ Materia creada.')
+    cerrarForm()
+    load()
   }
 
   return (
@@ -3690,77 +4300,107 @@ function GestionMaterias() {
         </h2>
         <button
           className='bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => (showForm ? cerrarForm() : abrirNuevo())}
         >
           {showForm ? 'Cancelar' : '+ Nueva materia'}
         </button>
       </div>
+
       {showForm && (
         <div className='bg-white rounded-card p-6 shadow-card border border-border mb-6'>
+          <div className='text-[15px] font-extrabold text-text mb-5'>
+            {editId !== null ? 'Editar materia' : 'Nueva materia'}
+          </div>
           <form
             onSubmit={handleCreate}
-            style={{ display: 'flex', gap: 14, alignItems: 'flex-end' }}
+            style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}
           >
-            <div style={{ flex: 2 }}>
+            <div>
               <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
-                Nombre de la materia
+                Nombre
               </span>
               <input
                 className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
                 required
                 value={form.nombre}
+                placeholder='Ej: Matemática'
                 onChange={(e) =>
                   setForm((p) => ({ ...p, nombre: e.target.value }))
                 }
               />
             </div>
-            <div style={{ flex: 1 }}>
+            <div>
               <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
                 Horas semanales
               </span>
               <input
                 type='number'
                 className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+                required
                 value={form.horas_semanales}
                 onChange={(e) =>
                   setForm((p) => ({ ...p, horas_semanales: e.target.value }))
                 }
               />
             </div>
-            <button
-              type='submit'
-              className='bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
-            >
-              Guardar
-            </button>
-          </form>
-          {msg && (
-            <div
-              style={{
-                marginTop: 10,
-                fontSize: 13,
-                fontWeight: 700,
-                color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
-              }}
-            >
-              {msg}
+            <div style={{ gridColumn: '1/-1' }}>
+              <button
+                type='submit'
+                disabled={guardando}
+                className={
+                  guardando
+                    ? 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer opacity-60'
+                    : 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+                }
+              >
+                {guardando
+                  ? 'Guardando...'
+                  : editId !== null
+                    ? 'Guardar cambios'
+                    : 'Crear materia'}
+              </button>
             </div>
-          )}
+            {msg && (
+              <div
+                style={{
+                  gridColumn: '1/-1',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+                }}
+              >
+                {msg}
+              </div>
+            )}
+          </form>
         </div>
       )}
+
+      {!showForm && msg && (
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            marginBottom: 14,
+            color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+          }}
+        >
+          {msg}
+        </div>
+      )}
+
       <div className='bg-white rounded-card p-6 shadow-card border border-border'>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
-                Materia
-              </th>
-              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
-                Horas semanales
-              </th>
-              <th className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'>
-                Estado
-              </th>
+              {['Materia', 'Horas semanales', 'Estado', 'Acciones'].map((t) => (
+                <th
+                  key={t}
+                  className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'
+                >
+                  {t}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -3777,8 +4417,26 @@ function GestionMaterias() {
                     {m.activo ? 'Activa' : 'Inactiva'}
                   </span>
                 </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  <button
+                    className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                    onClick={() => abrirEditar(m)}
+                  >
+                    Editar
+                  </button>
+                </td>
               </tr>
             ))}
+            {materias.length === 0 && (
+              <tr>
+                <td
+                  colSpan={4}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  No hay materias registradas.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -3844,7 +4502,8 @@ function GestionAsignaciones() {
         id_periodo: periodo?.id_periodo ?? null,
       },
     ])
-    if (error) setMsg('Error: ' + error.message)
+    // TP Metodología II · RF2.5 — la base impide asignaciones repetidas
+    if (error) setMsg(mensajeErrorAcademico(error.message))
     else {
       setMsg('✅ Asignación creada.')
       setShowForm(false)
@@ -3999,6 +4658,393 @@ function GestionAsignaciones() {
                 </td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HORARIOS DE CLASES (RF3.7, RF3.8)
+//  Cada horario pertenece a una asignación (curso + materia + docente).
+//  La base impide que dos horarios del mismo curso se superpongan.
+// ═══════════════════════════════════════════════════════════════
+interface HorarioClase {
+  id_horario: number
+  id_asignacion: number | null
+  dia_semana: string
+  hora_inicio: string
+  hora_fin: string
+  aula: string | null
+  asignaciones: {
+    id_curso: number | null
+    materias: { nombre: string } | null
+    docentes: { usuarios: { nombre: string; apellido: string } | null } | null
+    cursos: { nivel: string; grado_anio: string; division: string } | null
+  } | null
+}
+
+const etiquetaCurso = (
+  c: { nivel: string; grado_anio: string; division: string } | null,
+) => (c ? `${c.nivel} · ${c.grado_anio} "${c.division}"` : '—')
+
+async function cargarHorarios() {
+  const [{ data: ho }, { data: as }, { data: cu }] = await Promise.all([
+    supabase
+      .from('horarios')
+      .select(
+        '*, asignaciones(id_curso, materias(nombre), docentes(usuarios(nombre, apellido)), cursos(nivel, grado_anio, division))',
+      ),
+    supabase
+      .from('asignaciones')
+      .select(
+        '*, docentes(usuarios(nombre,apellido)), materias(nombre), cursos(nivel,grado_anio,division)',
+      )
+      .eq('activo', true),
+    supabase.from('cursos').select('*').eq('activo', true),
+  ])
+  return {
+    horarios: (ho ?? []) as unknown as HorarioClase[],
+    asignaciones: (as ?? []) as unknown as Asignacion[],
+    cursos: (cu ?? []) as Curso[],
+  }
+}
+
+function GestionHorarios() {
+  const [horarios, setHorarios] = useState<HorarioClase[]>([])
+  const [asignaciones, setAsignaciones] = useState<Asignacion[]>([])
+  const [cursos, setCursos] = useState<Curso[]>([])
+  const [cursoFiltro, setCursoFiltro] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [editId, setEditId] = useState<number | null>(null)
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState('')
+  const HORARIO_VACIO = {
+    id_asignacion: '',
+    dia_semana: 'Lunes',
+    hora_inicio: '',
+    hora_fin: '',
+    aula: '',
+  }
+  const [form, setForm] = useState(HORARIO_VACIO)
+
+  const aplicar = useCallback(
+    (r: Awaited<ReturnType<typeof cargarHorarios>>) => {
+      setHorarios(r.horarios)
+      setAsignaciones(r.asignaciones)
+      setCursos(r.cursos)
+    },
+    [],
+  )
+  const load = () => cargarHorarios().then(aplicar)
+
+  useEffect(() => {
+    cargarHorarios().then(aplicar)
+  }, [aplicar])
+
+  const etiquetaAsignacion = (a: Asignacion) =>
+    `${etiquetaCurso(a.cursos)} · ${a.materias?.nombre ?? '—'} · Prof. ${
+      a.docentes?.usuarios?.apellido ?? '—'
+    }`
+
+  // Filtro por curso y orden: curso → día de la semana → hora de inicio
+  const horariosVisibles = horarios
+    .filter(
+      (h) =>
+        !cursoFiltro || String(h.asignaciones?.id_curso) === cursoFiltro,
+    )
+    .sort((a, b) => {
+      const c = etiquetaCurso(a.asignaciones?.cursos ?? null).localeCompare(
+        etiquetaCurso(b.asignaciones?.cursos ?? null),
+      )
+      if (c !== 0) return c
+      const d = DIAS_SEMANA.indexOf(a.dia_semana) - DIAS_SEMANA.indexOf(b.dia_semana)
+      if (d !== 0) return d
+      return a.hora_inicio.localeCompare(b.hora_inicio)
+    })
+
+  const cerrarForm = () => {
+    setShowForm(false)
+    setEditId(null)
+    setForm(HORARIO_VACIO)
+  }
+
+  const abrirNuevo = () => {
+    setEditId(null)
+    setForm(HORARIO_VACIO)
+    setMsg('')
+    setShowForm(true)
+  }
+
+  // RF3.8 — Cargar el horario en el formulario para modificarlo
+  const abrirEditar = (h: HorarioClase) => {
+    setEditId(h.id_horario)
+    setForm({
+      id_asignacion: h.id_asignacion != null ? String(h.id_asignacion) : '',
+      dia_semana: h.dia_semana,
+      hora_inicio: h.hora_inicio.slice(0, 5),
+      hora_fin: h.hora_fin.slice(0, 5),
+      aula: h.aula ?? '',
+    })
+    setMsg('')
+    setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const guardar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setMsg('')
+    const errorValidacion = validarHorario(form)
+    if (errorValidacion) {
+      setMsg(errorValidacion)
+      return
+    }
+    setGuardando(true)
+    const datos = {
+      id_asignacion: Number(form.id_asignacion),
+      dia_semana: form.dia_semana,
+      hora_inicio: form.hora_inicio,
+      hora_fin: form.hora_fin,
+      aula: form.aula.trim() || null,
+    }
+    const { error } =
+      editId !== null
+        ? await supabase.from('horarios').update(datos).eq('id_horario', editId)
+        : await supabase.from('horarios').insert([datos])
+    setGuardando(false)
+    if (error) {
+      setMsg(mensajeErrorAcademico(error.message))
+      return
+    }
+    setMsg(editId !== null ? '✅ Horario actualizado.' : '✅ Horario registrado.')
+    cerrarForm()
+    load()
+  }
+
+  const INPUT =
+    'w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+  const LABEL = 'text-[11px] font-extrabold text-textMuted block mb-[5px]'
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
+          🕐 Horarios de clases
+        </h2>
+        <button
+          className='bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+          onClick={() => (showForm ? cerrarForm() : abrirNuevo())}
+        >
+          {showForm ? 'Cancelar' : '+ Nuevo horario'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className='bg-white rounded-card p-6 shadow-card border border-border mb-6'>
+          <div className='text-[15px] font-extrabold text-text mb-5'>
+            {editId !== null ? 'Editar horario' : 'Registrar horario'}
+          </div>
+          <form
+            onSubmit={guardar}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1fr 1fr',
+              gap: 14,
+            }}
+          >
+            <div style={{ gridColumn: '1/-1' }}>
+              <span className={LABEL}>Asignación (curso · materia · docente)</span>
+              <select
+                className={`${INPUT} appearance-none`}
+                required
+                value={form.id_asignacion}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, id_asignacion: e.target.value }))
+                }
+              >
+                <option value=''>Seleccionar asignación</option>
+                {asignaciones.map((a) => (
+                  <option key={a.id_asignacion} value={a.id_asignacion}>
+                    {etiquetaAsignacion(a)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <span className={LABEL}>Día</span>
+              <select
+                className={`${INPUT} appearance-none`}
+                required
+                value={form.dia_semana}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, dia_semana: e.target.value }))
+                }
+              >
+                {DIAS_SEMANA.map((d) => (
+                  <option key={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <span className={LABEL}>Hora de inicio</span>
+              <input
+                type='time'
+                className={INPUT}
+                required
+                value={form.hora_inicio}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, hora_inicio: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className={LABEL}>Hora de fin</span>
+              <input
+                type='time'
+                className={INPUT}
+                required
+                value={form.hora_fin}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, hora_fin: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className={LABEL}>Aula</span>
+              <input
+                className={INPUT}
+                value={form.aula}
+                placeholder='Opcional'
+                onChange={(e) => setForm((p) => ({ ...p, aula: e.target.value }))}
+              />
+            </div>
+            <div style={{ gridColumn: '1/-1' }}>
+              <button
+                type='submit'
+                disabled={guardando}
+                className={
+                  guardando
+                    ? 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer opacity-60'
+                    : 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+                }
+              >
+                {guardando
+                  ? 'Guardando...'
+                  : editId !== null
+                    ? 'Guardar cambios'
+                    : 'Registrar horario'}
+              </button>
+            </div>
+            {msg && (
+              <div
+                style={{
+                  gridColumn: '1/-1',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+                }}
+              >
+                {msg}
+              </div>
+            )}
+          </form>
+        </div>
+      )}
+
+      {!showForm && msg && (
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            marginBottom: 14,
+            color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+          }}
+        >
+          {msg}
+        </div>
+      )}
+
+      <div className='bg-white rounded-card p-6 shadow-card border border-border'>
+        <select
+          className={`${INPUT} appearance-none mb-4`}
+          value={cursoFiltro}
+          onChange={(e) => setCursoFiltro(e.target.value)}
+        >
+          <option value=''>Todos los cursos</option>
+          {cursos.map((c) => (
+            <option key={c.id_curso} value={c.id_curso}>
+              {etiquetaCurso(c)}
+            </option>
+          ))}
+        </select>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['Curso', 'Día', 'Horario', 'Materia', 'Docente', 'Aula', 'Acciones'].map(
+                (t) => (
+                  <th
+                    key={t}
+                    className='text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'
+                  >
+                    {t}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {horariosVisibles.map((h) => (
+              <tr key={h.id_horario}>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle font-bold'>
+                  {etiquetaCurso(h.asignaciones?.cursos ?? null)}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  {h.dia_semana}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle font-extrabold text-purple-700'>
+                  {h.hora_inicio.slice(0, 5)} – {h.hora_fin.slice(0, 5)}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  {h.asignaciones?.materias?.nombre ?? '—'}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
+                  {h.asignaciones?.docentes?.usuarios
+                    ? `${h.asignaciones.docentes.usuarios.apellido}, ${h.asignaciones.docentes.usuarios.nombre}`
+                    : '—'}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle text-textMuted'>
+                  {h.aula ?? '—'}
+                </td>
+                <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  <button
+                    className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                    onClick={() => abrirEditar(h)}
+                  >
+                    Editar
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {horariosVisibles.length === 0 && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  {cursoFiltro
+                    ? 'Este curso todavía no tiene horarios cargados.'
+                    : 'No hay horarios cargados.'}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

@@ -79,7 +79,8 @@ interface HorarioHoy {
   aula: string | null
   asignaciones: {
     materias: { nombre: string }
-    docentes: { nombre: string; apellido: string }
+    // nombre y apellido del docente están en la tabla `usuarios`
+    docentes: { usuarios: { nombre: string; apellido: string } | null } | null
   }
 }
 
@@ -496,7 +497,7 @@ export default function StudentPortal() {
     const { data } = await supabase
       .from('horarios')
       .select(
-        '*, asignaciones!inner(materias(nombre), docentes(nombre, apellido), id_curso)',
+        '*, asignaciones!inner(materias(nombre), docentes(usuarios(nombre, apellido)), id_curso)',
       )
       .eq('dia_semana', diaActual())
       .eq('asignaciones.id_curso', idCurso)
@@ -852,7 +853,7 @@ export default function StudentPortal() {
                             {h.asignaciones?.materias?.nombre}
                           </div>
                           <div className='text-xs text-textMuted mt-0.5'>
-                            Prof. {h.asignaciones?.docentes?.apellido} ·{' '}
+                            Prof. {h.asignaciones?.docentes?.usuarios?.apellido} ·{' '}
                             {h.aula ?? 'Aula s/d'}
                           </div>
                         </div>
@@ -1282,8 +1283,8 @@ export default function StudentPortal() {
                         {h.asignaciones?.materias?.nombre}
                       </div>
                       <div className='text-[13px] text-textMuted mt-0.5'>
-                        Prof. {h.asignaciones?.docentes?.nombre}{' '}
-                        {h.asignaciones?.docentes?.apellido}
+                        Prof. {h.asignaciones?.docentes?.usuarios?.nombre}{' '}
+                        {h.asignaciones?.docentes?.usuarios?.apellido}
                       </div>
                       <div className='text-xs text-textMuted mt-0.5'>
                         📍 {h.aula ?? 'Aula a confirmar'}
