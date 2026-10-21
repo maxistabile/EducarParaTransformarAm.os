@@ -5,7 +5,7 @@
  *        Docente           → solo sus secciones
  */
 
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createClient } from '@supabase/supabase-js'
 import type { User } from '@supabase/supabase-js'
@@ -7483,6 +7483,10 @@ function GestionDeportes() {
   // Inscriptos del grupo elegido (RF4.3, RF4.4)
   const [grupoSel, setGrupoSel] = useState<number | null>(null)
   const [selAlumno, setSelAlumno] = useState('')
+  // El resultado de inscribir o dar de baja se muestra dentro del panel
+  // de inscriptos (que queda abajo de la tabla de grupos)
+  const [inscMsg, setInscMsg] = useState('')
+  const panelInscriptosRef = useRef<HTMLDivElement>(null)
 
   const aplicar = useCallback(
     (r: Awaited<ReturnType<typeof cargarDeportes>>) => {
@@ -7658,22 +7662,34 @@ function GestionDeportes() {
   const verInscriptos = (idGrupo: number) => {
     setSelAlumno('')
     setMsg('')
-    setGrupoSel(grupoSel === idGrupo ? null : idGrupo)
+    setInscMsg('')
+    const abrir = grupoSel !== idGrupo
+    setGrupoSel(abrir ? idGrupo : null)
+    // Lleva la pantalla al panel de inscriptos
+    if (abrir)
+      setTimeout(
+        () =>
+          panelInscriptosRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          }),
+        50,
+      )
   }
 
   const inscribir = async () => {
     if (grupoSel === null || !selAlumno) return
-    setMsg('')
+    setInscMsg('')
     setGuardando(true)
     const { error } = await supabase
       .from('inscripciones_deportivas')
       .insert([{ id_alumno: Number(selAlumno), id_grupo: grupoSel }])
     setGuardando(false)
     if (error) {
-      setMsg(mensajeErrorServicios(error.message))
+      setInscMsg(mensajeErrorServicios(error.message))
       return
     }
-    setMsg('✅ Alumno inscripto.')
+    setInscMsg('✅ Alumno inscripto.')
     setSelAlumno('')
     load()
   }
@@ -7681,16 +7697,16 @@ function GestionDeportes() {
   const darDeBaja = async (i: InscripcionDeportiva) => {
     const nombre = i.alumnos ? `${i.alumnos.apellido}, ${i.alumnos.nombre}` : ''
     if (!confirm(`¿Dar de baja a ${nombre} de este grupo?`)) return
-    setMsg('')
+    setInscMsg('')
     const { error } = await supabase
       .from('inscripciones_deportivas')
       .update({ activo: false })
       .eq('id_inscripcion_dep', i.id_inscripcion_dep)
     if (error) {
-      setMsg(mensajeErrorServicios(error.message))
+      setInscMsg(mensajeErrorServicios(error.message))
       return
     }
-    setMsg('✅ Inscripción dada de baja.')
+    setInscMsg('✅ Inscripción dada de baja.')
     load()
   }
 
@@ -7717,6 +7733,16 @@ function GestionDeportes() {
           !inscriptosGrupo.some((i) => i.id_alumno === a.id_alumno),
       )
     : []
+  const alumnosSinCurso = alumnos.filter((a) => !a.cursos).length
+  // Deportes que ya hace cada alumno (para avisar antes de inscribir)
+  const deportesDelAlumno = (idAlumno: number) =>
+    inscripciones
+      .filter((i) => i.id_alumno === idAlumno)
+      .map((i) => {
+        const g = grupos.find((x) => x.id_grupo === i.id_grupo)
+        return g ? nombreDeporte(g.id_actividad) : ''
+      })
+      .filter(Boolean)
 
   // Al editar un grupo cuyo profesor ya no está activo, se lo ofrece igual
   const grupoEditando = grupos.find((g) => g.id_grupo === grupoEditId)
@@ -8195,7 +8221,7 @@ function GestionDeportes() {
       </div>
 
       {grupoElegido && (
-        <div className={CLS_CARD}>
+        <div ref={panelInscriptosRef} className={CLS_CARD}>
           <div className='text-[15px] font-extrabold text-text mb-1'>
             Inscriptos · {etiquetaGrupo(grupoElegido)}
           </div>
@@ -8204,33 +8230,57 @@ function GestionDeportes() {
             Cupo: {inscriptosGrupo.length} / {grupoElegido.cupo}
           </div>
 
+          <Mensaje msg={inscMsg} />
+
           {grupoElegido.activo ? (
-            <div className='flex gap-3 mb-4 flex-wrap'>
-              <select
-                className={`${CLS_INPUT} appearance-none`}
-                style={{ maxWidth: 420 }}
-                value={selAlumno}
-                onChange={(e) => setSelAlumno(e.target.value)}
-              >
-                <option value=''>
-                  Seleccionar alumno de nivel {grupoElegido.nivel}
-                </option>
-                {alumnosElegibles.map((a) => (
-                  <option key={a.id_alumno} value={a.id_alumno}>
-                    {a.apellido}, {a.nombre}
-                    {a.legajo ? ` · ${a.legajo}` : ''} · {textoCurso(a.cursos)}
+            <div className='mb-4'>
+              <div className='flex gap-3 mb-2 flex-wrap'>
+                <select
+                  className={`${CLS_INPUT} appearance-none`}
+                  style={{ maxWidth: 520 }}
+                  value={selAlumno}
+                  onChange={(e) => setSelAlumno(e.target.value)}
+                >
+                  <option value=''>
+                    Seleccionar alumno de nivel {grupoElegido.nivel}
                   </option>
-                ))}
-              </select>
-              <button
-                className={
-                  !selAlumno || guardando ? `${CLS_BTN} opacity-60` : CLS_BTN
-                }
-                disabled={!selAlumno || guardando}
-                onClick={inscribir}
-              >
-                {guardando ? 'Inscribiendo...' : 'Inscribir'}
-              </button>
+                  {alumnosElegibles.map((a) => {
+                    const suyos = deportesDelAlumno(a.id_alumno)
+                    return (
+                      <option
+                        key={a.id_alumno}
+                        value={a.id_alumno}
+                        disabled={suyos.length >= 2}
+                      >
+                        {a.apellido}, {a.nombre}
+                        {a.legajo ? ` · ${a.legajo}` : ''} ·{' '}
+                        {textoCurso(a.cursos)}
+                        {suyos.length >= 2
+                          ? ` · ya tiene 2 deportes (${suyos.join(' y ')})`
+                          : suyos.length === 1
+                            ? ` · ya hace ${suyos[0]}`
+                            : ''}
+                      </option>
+                    )
+                  })}
+                </select>
+                <button
+                  className={
+                    !selAlumno || guardando ? `${CLS_BTN} opacity-60` : CLS_BTN
+                  }
+                  disabled={!selAlumno || guardando}
+                  onClick={inscribir}
+                >
+                  {guardando ? 'Inscribiendo...' : 'Inscribir'}
+                </button>
+              </div>
+              <div className='text-[12px] text-textMuted'>
+                {alumnosElegibles.length === 0
+                  ? `No hay alumnos activos de nivel ${grupoElegido.nivel} para inscribir en este grupo. `
+                  : `Se listan los alumnos activos de nivel ${grupoElegido.nivel}. `}
+                {alumnosSinCurso > 0 &&
+                  `${alumnosSinCurso} alumno(s) activo(s) no tienen curso asignado y por eso no aparecen: asignales un curso desde Alumnos para poder inscribirlos.`}
+              </div>
             </div>
           ) : (
             <div className='text-[13px] text-textMuted mb-4'>
