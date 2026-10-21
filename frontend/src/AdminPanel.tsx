@@ -9,6 +9,13 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createClient } from '@supabase/supabase-js'
 import type { User } from '@supabase/supabase-js'
+import {
+  DIAS_DEPORTE,
+  ordenarDias,
+  textoHorario,
+  textoCurso,
+  mensajeErrorServicios,
+} from './reglasServicios'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL as string,
@@ -307,6 +314,9 @@ const NAV_ADMIN = [
   { key: 'compras', icon: '🧪', label: 'Compras insumos' },
   { key: 'inscripciones', icon: '📋', label: 'Inscripciones' },
   { key: 'actividades', icon: '🎨', label: 'Extracurriculares' },
+  { key: 'deportes', icon: '⚽', label: 'Deportes' },
+  { key: 'transporte', icon: '🚌', label: 'Transporte' },
+  { key: 'comedor', icon: '🍽️', label: 'Comedor' },
   { key: 'reservas', icon: '🏟️', label: 'Reservas' },
   { key: 'mensajes', icon: '✉️', label: 'Mensajes' },
   { key: 'noticias', icon: '📰', label: 'Noticias' },
@@ -599,6 +609,9 @@ export default function AdminPanel() {
           )}
           {activeNav === 'mensajes' && esAdmin && <GestionMensajes />}
           {activeNav === 'actividades' && esAdmin && <GestionActividades />}
+          {activeNav === 'deportes' && esAdmin && <GestionDeportes />}
+          {activeNav === 'transporte' && esAdmin && <GestionTransporte />}
+          {activeNav === 'comedor' && esAdmin && <GestionComedor />}
           {activeNav === 'reservas' && <GestionReservas userId={user.id} />}
           {activeNav === 'noticias' && esAdmin && (
             <GestionNoticias userId={user.id} />
@@ -6900,7 +6913,6 @@ function GestionActividades() {
   }
 
   const idiomas = actividades.filter((a) => a.tipo === 'Idioma')
-  const deportes = actividades.filter((a) => a.tipo === 'Deporte')
 
   const renderGrupo = (titulo: string, items: ActividadEx[]) => (
     <div className='bg-white rounded-card p-6 shadow-card border border-border mb-5'>
@@ -7267,7 +7279,1681 @@ function GestionActividades() {
       )}
 
       {renderGrupo('🗣️ Idiomas', idiomas)}
-      {renderGrupo('⚽ Disciplinas deportivas', deportes)}
+      {/* TP Metodología II · RF4 — los deportes se inscriben por grupo */}
+      <div className='bg-white rounded-card p-6 shadow-card border border-border mb-5'>
+        <div className='text-[15px] font-extrabold text-text mb-2'>
+          ⚽ Disciplinas deportivas
+        </div>
+        <p style={{ fontSize: 13, color: '#6B6B8A', margin: 0 }}>
+          Los deportes se gestionan desde la sección <strong>Deportes</strong>,
+          con grupos según nivel y horario, profesor responsable y control de
+          cupos y horarios.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TP METODOLOGÍA II · RF4 — DEPORTES (HU21 a HU24)
+//  Deporte → grupos según nivel y horario, con profesor responsable →
+//  inscripción de alumnos. Las reglas (máximo dos deportes, sin cruces
+//  de horario, nivel del alumno y cupo) las controla la base de datos.
+// ═══════════════════════════════════════════════════════════════
+interface GrupoDeportivo {
+  id_grupo: number
+  id_actividad: number
+  nivel: string
+  id_docente: number
+  dias: string[]
+  hora_inicio: string
+  hora_fin: string
+  cupo: number
+  activo: boolean
+  docentes: { usuarios: { nombre: string; apellido: string } | null } | null
+}
+
+interface AlumnoInscripto {
+  legajo: string | null
+  nombre: string
+  apellido: string
+  cursos: { nivel: string; grado_anio: string; division: string } | null
+}
+
+interface InscripcionDeportiva {
+  id_inscripcion_dep: number
+  id_alumno: number
+  id_grupo: number
+  fecha_alta: string
+  alumnos: AlumnoInscripto | null
+}
+
+const SELECT_ALUMNO_INSCRIPTO =
+  'alumnos(legajo, nombre, apellido, cursos(nivel, grado_anio, division))'
+
+const nombreProfesor = (d: GrupoDeportivo['docentes']) =>
+  d?.usuarios ? `${d.usuarios.apellido}, ${d.usuarios.nombre}` : '—'
+
+const fechaCorta = (f: string) => new Date(f).toLocaleDateString('es-AR')
+
+// Alumnos activos para los selectores de inscripción
+const consultarAlumnosActivos = () =>
+  supabase
+    .from('alumnos')
+    .select(
+      'id_alumno, legajo, nombre, apellido, dni, activo, cursos(nivel, grado_anio, division)',
+    )
+    .eq('activo', true)
+    .order('apellido')
+
+async function cargarDeportes() {
+  const [dep, gru, ins, doc, alu] = await Promise.all([
+    supabase
+      .from('actividades_extracurriculares')
+      .select('*')
+      .eq('tipo', 'Deporte')
+      .order('nombre'),
+    supabase
+      .from('grupos_deportivos')
+      .select('*, docentes(usuarios(nombre, apellido))')
+      .order('id_grupo'),
+    supabase
+      .from('inscripciones_deportivas')
+      .select(
+        `id_inscripcion_dep, id_alumno, id_grupo, fecha_alta, ${SELECT_ALUMNO_INSCRIPTO}`,
+      )
+      .eq('activo', true)
+      .order('fecha_alta'),
+    supabase
+      .from('docentes')
+      .select('*, usuarios(nombre, apellido)')
+      .eq('activo', true),
+    consultarAlumnosActivos(),
+  ])
+  return {
+    deportes: (dep.data ?? []) as ActividadEx[],
+    grupos: (gru.data ?? []) as unknown as GrupoDeportivo[],
+    inscripciones: (ins.data ?? []) as unknown as InscripcionDeportiva[],
+    docentes: ((doc.data ?? []) as unknown as Docente[]).sort((a, b) =>
+      (a.usuarios?.apellido ?? '').localeCompare(b.usuarios?.apellido ?? ''),
+    ),
+    alumnos: (alu.data ?? []) as unknown as Alumno[],
+    error: gru.error?.message ?? ins.error?.message ?? null,
+  }
+}
+
+const CLS_INPUT =
+  'w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border'
+const CLS_LABEL = 'text-[11px] font-extrabold text-textMuted block mb-[5px]'
+const CLS_TH =
+  'text-left text-[10px] font-extrabold text-textMuted uppercase tracking-[0.07em] pb-3 pr-3 border-b-2 border-border'
+const CLS_TD = 'py-[11px] pr-3 text-[13px] border-b border-border align-middle'
+const CLS_BTN =
+  'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
+const CLS_CHIP =
+  'bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+const CLS_CHIP_ROJO =
+  'bg-[#E74C3C1A] text-red border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+const CLS_CARD = 'bg-white rounded-card p-6 shadow-card border border-border'
+
+function Mensaje({ msg }: { msg: string }) {
+  if (!msg) return null
+  return (
+    <div
+      style={{
+        fontSize: 13,
+        fontWeight: 700,
+        marginBottom: 14,
+        color: msg.startsWith('✅') ? '#27AE60' : '#E74C3C',
+      }}
+    >
+      {msg}
+    </div>
+  )
+}
+
+function GestionDeportes() {
+  const [deportes, setDeportes] = useState<ActividadEx[]>([])
+  const [grupos, setGrupos] = useState<GrupoDeportivo[]>([])
+  const [inscripciones, setInscripciones] = useState<InscripcionDeportiva[]>(
+    [],
+  )
+  const [docentes, setDocentes] = useState<Docente[]>([])
+  const [alumnos, setAlumnos] = useState<Alumno[]>([])
+  const [msg, setMsg] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  // Deporte (RF4.1)
+  const [depModo, setDepModo] = useState<'cerrado' | 'nuevo' | 'editar'>(
+    'cerrado',
+  )
+  const [depEditId, setDepEditId] = useState<number | null>(null)
+  const [depForm, setDepForm] = useState({
+    nombre: '',
+    descripcion: '',
+    activo: true,
+  })
+
+  // Grupo (RF4.2)
+  const GRUPO_VACIO = {
+    id_actividad: '',
+    nivel: '',
+    id_docente: '',
+    dias: [] as string[],
+    hora_inicio: '',
+    hora_fin: '',
+    cupo: '20',
+    activo: true,
+  }
+  const [grupoAbierto, setGrupoAbierto] = useState(false)
+  const [grupoEditId, setGrupoEditId] = useState<number | null>(null)
+  const [gForm, setGForm] = useState(GRUPO_VACIO)
+  const [filtroDeporte, setFiltroDeporte] = useState('')
+
+  // Inscriptos del grupo elegido (RF4.3, RF4.4)
+  const [grupoSel, setGrupoSel] = useState<number | null>(null)
+  const [selAlumno, setSelAlumno] = useState('')
+
+  const aplicar = useCallback(
+    (r: Awaited<ReturnType<typeof cargarDeportes>>) => {
+      setDeportes(r.deportes)
+      setGrupos(r.grupos)
+      setInscripciones(r.inscripciones)
+      setDocentes(r.docentes)
+      setAlumnos(r.alumnos)
+      if (r.error) setMsg(mensajeErrorServicios(r.error))
+    },
+    [],
+  )
+  const load = () => cargarDeportes().then(aplicar)
+
+  useEffect(() => {
+    cargarDeportes().then(aplicar)
+  }, [aplicar])
+
+  const nombreDeporte = (id: number) =>
+    deportes.find((d) => d.id_actividad === id)?.nombre ?? '—'
+  const ocupados = (idGrupo: number) =>
+    inscripciones.filter((i) => i.id_grupo === idGrupo).length
+  const etiquetaGrupo = (g: GrupoDeportivo) =>
+    `${nombreDeporte(g.id_actividad)} · ${g.nivel} · ${textoHorario(g)}`
+
+  // ── Deportes ────────────────────────────────────────────────
+  const abrirNuevoDeporte = () => {
+    setDepForm({ nombre: '', descripcion: '', activo: true })
+    setDepEditId(null)
+    setMsg('')
+    setDepModo('nuevo')
+  }
+
+  const abrirEditarDeporte = (d: ActividadEx) => {
+    setDepForm({
+      nombre: d.nombre,
+      descripcion: d.descripcion ?? '',
+      activo: d.activo,
+    })
+    setDepEditId(d.id_actividad)
+    setMsg('')
+    setDepModo('editar')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const guardarDeporte = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setMsg('')
+    const nombre = limpiarTexto(depForm.nombre)
+    if (nombre.length < 3) {
+      setMsg('El nombre del deporte debe tener al menos 3 caracteres.')
+      return
+    }
+    if (
+      deportes.some(
+        (d) =>
+          d.id_actividad !== depEditId &&
+          normalizarTexto(d.nombre) === normalizarTexto(nombre),
+      )
+    ) {
+      setMsg('Ya existe un deporte con ese nombre.')
+      return
+    }
+    setGuardando(true)
+    const datos = {
+      nombre,
+      descripcion: depForm.descripcion.trim() || null,
+      activo: depForm.activo,
+    }
+    const { error } =
+      depModo === 'editar' && depEditId !== null
+        ? await supabase
+            .from('actividades_extracurriculares')
+            .update(datos)
+            .eq('id_actividad', depEditId)
+        : await supabase
+            .from('actividades_extracurriculares')
+            .insert([{ ...datos, tipo: 'Deporte', cupo_maximo: 20 }])
+    setGuardando(false)
+    if (error) {
+      setMsg(mensajeErrorServicios(error.message))
+      return
+    }
+    setMsg(
+      depModo === 'editar' ? '✅ Deporte actualizado.' : '✅ Deporte registrado.',
+    )
+    setDepModo('cerrado')
+    load()
+  }
+
+  // ── Grupos ──────────────────────────────────────────────────
+  const abrirNuevoGrupo = (idActividad?: number) => {
+    setGForm({
+      ...GRUPO_VACIO,
+      id_actividad: idActividad !== undefined ? String(idActividad) : '',
+    })
+    setGrupoEditId(null)
+    setMsg('')
+    setGrupoAbierto(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const abrirEditarGrupo = (g: GrupoDeportivo) => {
+    setGForm({
+      id_actividad: String(g.id_actividad),
+      nivel: g.nivel,
+      id_docente: String(g.id_docente),
+      dias: ordenarDias(g.dias),
+      hora_inicio: g.hora_inicio.slice(0, 5),
+      hora_fin: g.hora_fin.slice(0, 5),
+      cupo: String(g.cupo),
+      activo: g.activo,
+    })
+    setGrupoEditId(g.id_grupo)
+    setMsg('')
+    setGrupoAbierto(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const alternarDia = (dia: string) =>
+    setGForm((p) => ({
+      ...p,
+      dias: p.dias.includes(dia)
+        ? p.dias.filter((d) => d !== dia)
+        : ordenarDias([...p.dias, dia]),
+    }))
+
+  const guardarGrupo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setMsg('')
+    if (!gForm.id_actividad) return setMsg('Elegí el deporte.')
+    if (!gForm.nivel) return setMsg('Elegí el nivel del grupo.')
+    if (!gForm.id_docente) return setMsg('Elegí el profesor responsable.')
+    if (gForm.dias.length === 0) return setMsg('Elegí al menos un día.')
+    if (!gForm.hora_inicio || !gForm.hora_fin)
+      return setMsg('Completá la hora de inicio y la de fin.')
+    if (gForm.hora_fin <= gForm.hora_inicio)
+      return setMsg('La hora de fin tiene que ser posterior a la de inicio.')
+    const cupo = Number(gForm.cupo)
+    if (!Number.isInteger(cupo) || cupo < 1 || cupo > 200)
+      return setMsg('El cupo debe ser un número entero entre 1 y 200.')
+
+    setGuardando(true)
+    const datos = {
+      id_actividad: Number(gForm.id_actividad),
+      nivel: gForm.nivel,
+      id_docente: Number(gForm.id_docente),
+      dias: ordenarDias(gForm.dias),
+      hora_inicio: gForm.hora_inicio,
+      hora_fin: gForm.hora_fin,
+      cupo,
+      activo: gForm.activo,
+    }
+    const { error } =
+      grupoEditId !== null
+        ? await supabase
+            .from('grupos_deportivos')
+            .update(datos)
+            .eq('id_grupo', grupoEditId)
+        : await supabase.from('grupos_deportivos').insert([datos])
+    setGuardando(false)
+    if (error) {
+      setMsg(mensajeErrorServicios(error.message))
+      return
+    }
+    setMsg(grupoEditId !== null ? '✅ Grupo actualizado.' : '✅ Grupo creado.')
+    setGrupoAbierto(false)
+    setGrupoEditId(null)
+    load()
+  }
+
+  // ── Inscripciones ───────────────────────────────────────────
+  const verInscriptos = (idGrupo: number) => {
+    setSelAlumno('')
+    setMsg('')
+    setGrupoSel(grupoSel === idGrupo ? null : idGrupo)
+  }
+
+  const inscribir = async () => {
+    if (grupoSel === null || !selAlumno) return
+    setMsg('')
+    setGuardando(true)
+    const { error } = await supabase
+      .from('inscripciones_deportivas')
+      .insert([{ id_alumno: Number(selAlumno), id_grupo: grupoSel }])
+    setGuardando(false)
+    if (error) {
+      setMsg(mensajeErrorServicios(error.message))
+      return
+    }
+    setMsg('✅ Alumno inscripto.')
+    setSelAlumno('')
+    load()
+  }
+
+  const darDeBaja = async (i: InscripcionDeportiva) => {
+    const nombre = i.alumnos ? `${i.alumnos.apellido}, ${i.alumnos.nombre}` : ''
+    if (!confirm(`¿Dar de baja a ${nombre} de este grupo?`)) return
+    setMsg('')
+    const { error } = await supabase
+      .from('inscripciones_deportivas')
+      .update({ activo: false })
+      .eq('id_inscripcion_dep', i.id_inscripcion_dep)
+    if (error) {
+      setMsg(mensajeErrorServicios(error.message))
+      return
+    }
+    setMsg('✅ Inscripción dada de baja.')
+    load()
+  }
+
+  const gruposVisibles = grupos
+    .filter((g) => !filtroDeporte || String(g.id_actividad) === filtroDeporte)
+    .sort(
+      (a, b) =>
+        nombreDeporte(a.id_actividad).localeCompare(
+          nombreDeporte(b.id_actividad),
+        ) ||
+        NIVELES_INSTITUCION.indexOf(a.nivel) -
+          NIVELES_INSTITUCION.indexOf(b.nivel) ||
+        DIAS_DEPORTE.indexOf(ordenarDias(a.dias)[0]) -
+          DIAS_DEPORTE.indexOf(ordenarDias(b.dias)[0]) ||
+        a.hora_inicio.localeCompare(b.hora_inicio),
+    )
+
+  const grupoElegido = grupos.find((g) => g.id_grupo === grupoSel) ?? null
+  const inscriptosGrupo = inscripciones.filter((i) => i.id_grupo === grupoSel)
+  const alumnosElegibles = grupoElegido
+    ? alumnos.filter(
+        (a) =>
+          a.cursos?.nivel === grupoElegido.nivel &&
+          !inscriptosGrupo.some((i) => i.id_alumno === a.id_alumno),
+      )
+    : []
+
+  // Al editar un grupo cuyo profesor ya no está activo, se lo ofrece igual
+  const grupoEditando = grupos.find((g) => g.id_grupo === grupoEditId)
+  const profesorFueraDeLista =
+    grupoEditando &&
+    !docentes.some((d) => d.id_docente === grupoEditando.id_docente)
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 20,
+          gap: 10,
+          flexWrap: 'wrap',
+        }}
+      >
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
+          ⚽ Deportes
+        </h2>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            className={CLS_BTN}
+            onClick={() =>
+              depModo === 'cerrado' ? abrirNuevoDeporte() : setDepModo('cerrado')
+            }
+          >
+            {depModo === 'cerrado' ? '+ Nuevo deporte' : 'Cancelar'}
+          </button>
+          <button
+            className={CLS_BTN}
+            onClick={() =>
+              grupoAbierto ? setGrupoAbierto(false) : abrirNuevoGrupo()
+            }
+          >
+            {grupoAbierto ? 'Cancelar grupo' : '+ Nuevo grupo'}
+          </button>
+        </div>
+      </div>
+
+      <div className={`${CLS_CARD} mb-3`}>
+        <p style={{ fontSize: 13, color: '#6B6B8A', margin: 0 }}>
+          Cada deporte se organiza en <strong>grupos según nivel y horario</strong>,
+          con un <strong>profesor responsable</strong>. Un alumno puede
+          participar en <strong>hasta dos deportes</strong>, solo en grupos de
+          su nivel y sin que se superpongan los horarios.
+        </p>
+      </div>
+
+      {depModo !== 'cerrado' && (
+        <div className={`${CLS_CARD} mb-3`}>
+          <div className='text-[15px] font-extrabold text-text mb-5'>
+            {depModo === 'editar' ? 'Editar deporte' : 'Registrar deporte'}
+          </div>
+          <form
+            onSubmit={guardarDeporte}
+            style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14 }}
+          >
+            <div>
+              <span className={CLS_LABEL}>Nombre</span>
+              <input
+                className={CLS_INPUT}
+                required
+                value={depForm.nombre}
+                placeholder='Ej: Fútbol'
+                onChange={(e) =>
+                  setDepForm((p) => ({ ...p, nombre: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className={CLS_LABEL}>Descripción</span>
+              <input
+                className={CLS_INPUT}
+                value={depForm.descripcion}
+                placeholder='Opcional'
+                onChange={(e) =>
+                  setDepForm((p) => ({ ...p, descripcion: e.target.value }))
+                }
+              />
+            </div>
+            {depModo === 'editar' && (
+              <label
+                style={{ gridColumn: '1/-1' }}
+                className='flex items-center gap-2 text-[13px] text-text cursor-pointer'
+              >
+                <input
+                  type='checkbox'
+                  checked={depForm.activo}
+                  onChange={(e) =>
+                    setDepForm((p) => ({ ...p, activo: e.target.checked }))
+                  }
+                />
+                Deporte activo (si se desactiva, no se aceptan inscripciones
+                nuevas)
+              </label>
+            )}
+            <div style={{ gridColumn: '1/-1' }}>
+              <button
+                type='submit'
+                disabled={guardando}
+                className={guardando ? `${CLS_BTN} opacity-60` : CLS_BTN}
+              >
+                {guardando
+                  ? 'Guardando...'
+                  : depModo === 'editar'
+                    ? 'Guardar cambios'
+                    : 'Registrar deporte'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {grupoAbierto && (
+        <div className={`${CLS_CARD} mb-3`}>
+          <div className='text-[15px] font-extrabold text-text mb-5'>
+            {grupoEditId !== null ? 'Editar grupo' : 'Nuevo grupo'}
+          </div>
+          <form
+            onSubmit={guardarGrupo}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1fr',
+              gap: 14,
+            }}
+          >
+            <div>
+              <span className={CLS_LABEL}>Deporte</span>
+              <select
+                className={`${CLS_INPUT} appearance-none`}
+                required
+                value={gForm.id_actividad}
+                onChange={(e) =>
+                  setGForm((p) => ({ ...p, id_actividad: e.target.value }))
+                }
+              >
+                <option value=''>Seleccionar</option>
+                {deportes
+                  .filter(
+                    (d) =>
+                      d.activo || String(d.id_actividad) === gForm.id_actividad,
+                  )
+                  .map((d) => (
+                    <option key={d.id_actividad} value={d.id_actividad}>
+                      {d.nombre}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <span className={CLS_LABEL}>Nivel</span>
+              <select
+                className={`${CLS_INPUT} appearance-none`}
+                required
+                value={gForm.nivel}
+                onChange={(e) =>
+                  setGForm((p) => ({ ...p, nivel: e.target.value }))
+                }
+              >
+                <option value=''>Seleccionar</option>
+                {NIVELES_INSTITUCION.map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <span className={CLS_LABEL}>Profesor responsable</span>
+              <select
+                className={`${CLS_INPUT} appearance-none`}
+                required
+                value={gForm.id_docente}
+                onChange={(e) =>
+                  setGForm((p) => ({ ...p, id_docente: e.target.value }))
+                }
+              >
+                <option value=''>Seleccionar</option>
+                {profesorFueraDeLista && grupoEditando && (
+                  <option value={grupoEditando.id_docente}>
+                    {nombreProfesor(grupoEditando.docentes)} (inactivo)
+                  </option>
+                )}
+                {docentes.map((d) => (
+                  <option key={d.id_docente} value={d.id_docente}>
+                    {d.usuarios
+                      ? `${d.usuarios.apellido}, ${d.usuarios.nombre}`
+                      : `Docente ${d.id_docente}`}
+                    {d.especialidad ? ` · ${d.especialidad}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ gridColumn: '1/-1' }}>
+              <span className={CLS_LABEL}>Días</span>
+              <div className='flex flex-wrap gap-4 py-1'>
+                {DIAS_DEPORTE.map((d) => (
+                  <label
+                    key={d}
+                    className='flex items-center gap-1.5 text-[13px] text-text cursor-pointer'
+                  >
+                    <input
+                      type='checkbox'
+                      checked={gForm.dias.includes(d)}
+                      onChange={() => alternarDia(d)}
+                    />
+                    {d}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span className={CLS_LABEL}>Hora de inicio</span>
+              <input
+                type='time'
+                className={CLS_INPUT}
+                required
+                value={gForm.hora_inicio}
+                onChange={(e) =>
+                  setGForm((p) => ({ ...p, hora_inicio: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className={CLS_LABEL}>Hora de fin</span>
+              <input
+                type='time'
+                className={CLS_INPUT}
+                required
+                value={gForm.hora_fin}
+                onChange={(e) =>
+                  setGForm((p) => ({ ...p, hora_fin: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className={CLS_LABEL}>Cupo</span>
+              <input
+                type='number'
+                className={CLS_INPUT}
+                required
+                value={gForm.cupo}
+                onChange={(e) =>
+                  setGForm((p) => ({ ...p, cupo: e.target.value }))
+                }
+              />
+            </div>
+            {grupoEditId !== null && (
+              <label
+                style={{ gridColumn: '1/-1' }}
+                className='flex items-center gap-2 text-[13px] text-text cursor-pointer'
+              >
+                <input
+                  type='checkbox'
+                  checked={gForm.activo}
+                  onChange={(e) =>
+                    setGForm((p) => ({ ...p, activo: e.target.checked }))
+                  }
+                />
+                Grupo activo
+              </label>
+            )}
+            <div style={{ gridColumn: '1/-1' }}>
+              <button
+                type='submit'
+                disabled={guardando}
+                className={guardando ? `${CLS_BTN} opacity-60` : CLS_BTN}
+              >
+                {guardando
+                  ? 'Guardando...'
+                  : grupoEditId !== null
+                    ? 'Guardar cambios'
+                    : 'Crear grupo'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <Mensaje msg={msg} />
+
+      <div className={`${CLS_CARD} mb-5`}>
+        <div className='text-[15px] font-extrabold text-text mb-4'>
+          Disciplinas
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['Deporte', 'Grupos', 'Inscriptos', 'Estado', 'Acciones'].map(
+                (t) => (
+                  <th key={t} className={CLS_TH}>
+                    {t}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {deportes.map((d) => {
+              const gruposDep = grupos.filter(
+                (g) => g.id_actividad === d.id_actividad,
+              )
+              const inscriptos = inscripciones.filter((i) =>
+                gruposDep.some((g) => g.id_grupo === i.id_grupo),
+              ).length
+              return (
+                <tr key={d.id_actividad}>
+                  <td className={`${CLS_TD} font-bold`}>
+                    {d.nombre}
+                    {d.descripcion && (
+                      <>
+                        <br />
+                        <span style={{ fontSize: 11, color: '#6B6B8A' }}>
+                          {d.descripcion}
+                        </span>
+                      </>
+                    )}
+                  </td>
+                  <td className={CLS_TD}>
+                    {gruposDep.length > 0 ? (
+                      gruposDep.length
+                    ) : (
+                      <span style={badge('#E67E22')}>Sin grupos</span>
+                    )}
+                  </td>
+                  <td className={CLS_TD}>{inscriptos}</td>
+                  <td className={CLS_TD}>
+                    <span style={badge(d.activo ? '#27AE60' : '#6B6B8A')}>
+                      {d.activo ? 'Activo' : 'Inactivo'}
+                    </span>
+                  </td>
+                  <td className={CLS_TD}>
+                    <div className='flex items-center gap-2'>
+                      <button
+                        className={CLS_CHIP}
+                        onClick={() => abrirEditarDeporte(d)}
+                      >
+                        Editar
+                      </button>
+                      {d.activo && (
+                        <button
+                          className={CLS_CHIP}
+                          onClick={() => abrirNuevoGrupo(d.id_actividad)}
+                        >
+                          + Grupo
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+            {deportes.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  No hay deportes registrados.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className={`${CLS_CARD} mb-5`}>
+        <div className='flex justify-between items-center mb-4 gap-3 flex-wrap'>
+          <div className='text-[15px] font-extrabold text-text'>
+            Grupos por nivel y horario
+          </div>
+          <select
+            className={`${CLS_INPUT} appearance-none`}
+            style={{ maxWidth: 260 }}
+            value={filtroDeporte}
+            onChange={(e) => setFiltroDeporte(e.target.value)}
+          >
+            <option value=''>Todos los deportes</option>
+            {deportes.map((d) => (
+              <option key={d.id_actividad} value={d.id_actividad}>
+                {d.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {[
+                'Deporte',
+                'Nivel',
+                'Días y horario',
+                'Profesor responsable',
+                'Cupo',
+                'Estado',
+                'Acciones',
+              ].map((t) => (
+                <th key={t} className={CLS_TH}>
+                  {t}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {gruposVisibles.map((g) => {
+              const n = ocupados(g.id_grupo)
+              const completo = n >= g.cupo
+              const elegido = grupoSel === g.id_grupo
+              return (
+                <tr key={g.id_grupo}>
+                  <td className={`${CLS_TD} font-bold`}>
+                    {nombreDeporte(g.id_actividad)}
+                  </td>
+                  <td className={CLS_TD}>
+                    <span style={badge(colorNivel(g.nivel))}>{g.nivel}</span>
+                  </td>
+                  <td className={`${CLS_TD} font-extrabold text-purple-700`}>
+                    {textoHorario(g)}
+                  </td>
+                  <td className={`${CLS_TD} text-textMuted`}>
+                    {nombreProfesor(g.docentes)}
+                  </td>
+                  <td className={CLS_TD}>
+                    <span
+                      style={badge(
+                        completo ? '#E74C3C' : n > 0 ? '#27AE60' : '#6B6B8A',
+                      )}
+                    >
+                      {n} / {g.cupo}
+                      {completo ? ' · COMPLETO' : ''}
+                    </span>
+                  </td>
+                  <td className={CLS_TD}>
+                    <span style={badge(g.activo ? '#27AE60' : '#6B6B8A')}>
+                      {g.activo ? 'Activo' : 'Inactivo'}
+                    </span>
+                  </td>
+                  <td className={CLS_TD}>
+                    <div className='flex items-center gap-2'>
+                      <button
+                        className={CLS_CHIP}
+                        onClick={() => abrirEditarGrupo(g)}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        className={
+                          elegido
+                            ? 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                            : CLS_CHIP
+                        }
+                        onClick={() => verInscriptos(g.id_grupo)}
+                      >
+                        {elegido ? '▲ Ocultar' : `Inscriptos (${n})`}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+            {gruposVisibles.length === 0 && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  {filtroDeporte
+                    ? 'Este deporte todavía no tiene grupos.'
+                    : 'Todavía no hay grupos. Creá uno con "+ Nuevo grupo".'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {grupoElegido && (
+        <div className={CLS_CARD}>
+          <div className='text-[15px] font-extrabold text-text mb-1'>
+            Inscriptos · {etiquetaGrupo(grupoElegido)}
+          </div>
+          <div className='text-[12px] text-textMuted mb-4'>
+            Profesor responsable: {nombreProfesor(grupoElegido.docentes)} ·
+            Cupo: {inscriptosGrupo.length} / {grupoElegido.cupo}
+          </div>
+
+          {grupoElegido.activo ? (
+            <div className='flex gap-3 mb-4 flex-wrap'>
+              <select
+                className={`${CLS_INPUT} appearance-none`}
+                style={{ maxWidth: 420 }}
+                value={selAlumno}
+                onChange={(e) => setSelAlumno(e.target.value)}
+              >
+                <option value=''>
+                  Seleccionar alumno de nivel {grupoElegido.nivel}
+                </option>
+                {alumnosElegibles.map((a) => (
+                  <option key={a.id_alumno} value={a.id_alumno}>
+                    {a.apellido}, {a.nombre}
+                    {a.legajo ? ` · ${a.legajo}` : ''} · {textoCurso(a.cursos)}
+                  </option>
+                ))}
+              </select>
+              <button
+                className={
+                  !selAlumno || guardando ? `${CLS_BTN} opacity-60` : CLS_BTN
+                }
+                disabled={!selAlumno || guardando}
+                onClick={inscribir}
+              >
+                {guardando ? 'Inscribiendo...' : 'Inscribir'}
+              </button>
+            </div>
+          ) : (
+            <div className='text-[13px] text-textMuted mb-4'>
+              El grupo está inactivo: no acepta inscripciones nuevas.
+            </div>
+          )}
+
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Legajo', 'Alumno', 'Curso', 'Desde', 'Acción'].map((t) => (
+                  <th key={t} className={CLS_TH}>
+                    {t}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {inscriptosGrupo.map((i) => (
+                <tr key={i.id_inscripcion_dep}>
+                  <td className={`${CLS_TD} font-extrabold text-purple-700`}>
+                    {i.alumnos?.legajo ?? '—'}
+                  </td>
+                  <td className={`${CLS_TD} font-bold`}>
+                    {i.alumnos?.apellido}, {i.alumnos?.nombre}
+                  </td>
+                  <td className={`${CLS_TD} text-textMuted`}>
+                    {textoCurso(i.alumnos?.cursos)}
+                  </td>
+                  <td className={`${CLS_TD} text-textMuted`}>
+                    {fechaCorta(i.fecha_alta)}
+                  </td>
+                  <td className={CLS_TD}>
+                    <button
+                      className={CLS_CHIP_ROJO}
+                      onClick={() => darDeBaja(i)}
+                    >
+                      Dar de baja
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {inscriptosGrupo.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className='py-6 text-center text-[13px] text-textMuted'
+                  >
+                    Todavía no hay alumnos inscriptos en este grupo.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TP METODOLOGÍA II · RF5 — TRANSPORTE (HU25, HU26, HU28)
+//  Cuatro recorridos; cada alumno puede tener un recorrido activo.
+// ═══════════════════════════════════════════════════════════════
+interface Recorrido {
+  id_recorrido: number
+  numero: number
+  nombre: string
+  descripcion: string | null
+  activo: boolean
+}
+
+interface InscripcionTransporte {
+  id_inscripcion_tra: number
+  id_alumno: number
+  id_recorrido: number
+  fecha_alta: string
+  alumnos: AlumnoInscripto | null
+}
+
+async function cargarTransporte() {
+  const [rec, ins, alu] = await Promise.all([
+    supabase.from('recorridos').select('*').order('numero'),
+    supabase
+      .from('inscripciones_transporte')
+      .select(
+        `id_inscripcion_tra, id_alumno, id_recorrido, fecha_alta, ${SELECT_ALUMNO_INSCRIPTO}`,
+      )
+      .eq('activo', true)
+      .order('fecha_alta'),
+    consultarAlumnosActivos(),
+  ])
+  return {
+    recorridos: (rec.data ?? []) as Recorrido[],
+    inscripciones: (ins.data ?? []) as unknown as InscripcionTransporte[],
+    alumnos: (alu.data ?? []) as unknown as Alumno[],
+    error: rec.error?.message ?? ins.error?.message ?? null,
+  }
+}
+
+function GestionTransporte() {
+  const [recorridos, setRecorridos] = useState<Recorrido[]>([])
+  const [inscripciones, setInscripciones] = useState<InscripcionTransporte[]>(
+    [],
+  )
+  const [alumnos, setAlumnos] = useState<Alumno[]>([])
+  const [msg, setMsg] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [recModo, setRecModo] = useState<'cerrado' | 'nuevo' | 'editar'>(
+    'cerrado',
+  )
+  const [recEditId, setRecEditId] = useState<number | null>(null)
+  const [recForm, setRecForm] = useState({
+    numero: '',
+    nombre: '',
+    descripcion: '',
+    activo: true,
+  })
+  const [selAlumno, setSelAlumno] = useState('')
+  const [selRecorrido, setSelRecorrido] = useState('')
+  const [filtro, setFiltro] = useState('')
+
+  const aplicar = useCallback(
+    (r: Awaited<ReturnType<typeof cargarTransporte>>) => {
+      setRecorridos(r.recorridos)
+      setInscripciones(r.inscripciones)
+      setAlumnos(r.alumnos)
+      if (r.error) setMsg(mensajeErrorServicios(r.error))
+    },
+    [],
+  )
+  const load = () => cargarTransporte().then(aplicar)
+
+  useEffect(() => {
+    cargarTransporte().then(aplicar)
+  }, [aplicar])
+
+  // RF5.1 — El servicio tiene cuatro recorridos: solo se registran los que falten
+  const faltantes = [1, 2, 3, 4].filter(
+    (n) => !recorridos.some((r) => r.numero === n),
+  )
+  const recorridosActivos = recorridos.filter((r) => r.activo)
+  const nombreRecorrido = (id: number) =>
+    recorridos.find((r) => r.id_recorrido === id)?.nombre ?? '—'
+
+  const abrirNuevoRecorrido = () => {
+    setRecForm({
+      numero: String(faltantes[0] ?? ''),
+      nombre: `Recorrido ${faltantes[0] ?? ''}`,
+      descripcion: '',
+      activo: true,
+    })
+    setRecEditId(null)
+    setMsg('')
+    setRecModo('nuevo')
+  }
+
+  const abrirEditarRecorrido = (r: Recorrido) => {
+    setRecForm({
+      numero: String(r.numero),
+      nombre: r.nombre,
+      descripcion: r.descripcion ?? '',
+      activo: r.activo,
+    })
+    setRecEditId(r.id_recorrido)
+    setMsg('')
+    setRecModo('editar')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const guardarRecorrido = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setMsg('')
+    const nombre = limpiarTexto(recForm.nombre)
+    if (nombre.length < 3)
+      return setMsg('El nombre del recorrido debe tener al menos 3 caracteres.')
+    if (
+      recorridos.some(
+        (r) =>
+          r.id_recorrido !== recEditId &&
+          normalizarTexto(r.nombre) === normalizarTexto(nombre),
+      )
+    )
+      return setMsg('Ya existe un recorrido con ese nombre.')
+    setGuardando(true)
+    const datos = {
+      nombre,
+      descripcion: recForm.descripcion.trim() || null,
+      activo: recForm.activo,
+    }
+    const { error } =
+      recModo === 'editar' && recEditId !== null
+        ? await supabase
+            .from('recorridos')
+            .update(datos)
+            .eq('id_recorrido', recEditId)
+        : await supabase
+            .from('recorridos')
+            .insert([{ ...datos, numero: Number(recForm.numero) }])
+    setGuardando(false)
+    if (error) return setMsg(mensajeErrorServicios(error.message))
+    setMsg(
+      recModo === 'editar'
+        ? '✅ Recorrido actualizado.'
+        : '✅ Recorrido registrado.',
+    )
+    setRecModo('cerrado')
+    load()
+  }
+
+  const inscribir = async () => {
+    if (!selAlumno || !selRecorrido) return
+    setMsg('')
+    setGuardando(true)
+    const { error } = await supabase.from('inscripciones_transporte').insert([
+      { id_alumno: Number(selAlumno), id_recorrido: Number(selRecorrido) },
+    ])
+    setGuardando(false)
+    if (error) return setMsg(mensajeErrorServicios(error.message))
+    setMsg('✅ Alumno inscripto al transporte.')
+    setSelAlumno('')
+    load()
+  }
+
+  const cambiarRecorrido = async (
+    i: InscripcionTransporte,
+    idRecorrido: string,
+  ) => {
+    if (!idRecorrido || Number(idRecorrido) === i.id_recorrido) return
+    if (
+      !confirm(
+        `¿Pasar a ${i.alumnos?.apellido}, ${i.alumnos?.nombre} al ${nombreRecorrido(Number(idRecorrido))}?`,
+      )
+    )
+      return
+    setMsg('')
+    const { error } = await supabase
+      .from('inscripciones_transporte')
+      .update({ id_recorrido: Number(idRecorrido) })
+      .eq('id_inscripcion_tra', i.id_inscripcion_tra)
+    if (error) return setMsg(mensajeErrorServicios(error.message))
+    setMsg('✅ Recorrido actualizado.')
+    load()
+  }
+
+  const darDeBaja = async (i: InscripcionTransporte) => {
+    if (
+      !confirm(
+        `¿Dar de baja del transporte a ${i.alumnos?.apellido}, ${i.alumnos?.nombre}?`,
+      )
+    )
+      return
+    setMsg('')
+    const { error } = await supabase
+      .from('inscripciones_transporte')
+      .update({ activo: false })
+      .eq('id_inscripcion_tra', i.id_inscripcion_tra)
+    if (error) return setMsg(mensajeErrorServicios(error.message))
+    setMsg('✅ Inscripción al transporte dada de baja.')
+    load()
+  }
+
+  const alumnosSinTransporte = alumnos.filter(
+    (a) => !inscripciones.some((i) => i.id_alumno === a.id_alumno),
+  )
+  const visibles = inscripciones.filter(
+    (i) => !filtro || String(i.id_recorrido) === filtro,
+  )
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ fontSize: 22, fontWeight: 900, margin: 0 }}>
+          🚌 Transporte
+        </h2>
+        {(faltantes.length > 0 || recModo !== 'cerrado') && (
+          <button
+            className={CLS_BTN}
+            onClick={() =>
+              recModo === 'cerrado' ? abrirNuevoRecorrido() : setRecModo('cerrado')
+            }
+          >
+            {recModo === 'cerrado' ? '+ Registrar recorrido' : 'Cancelar'}
+          </button>
+        )}
+      </div>
+
+      {recModo !== 'cerrado' && (
+        <div className={`${CLS_CARD} mb-3`}>
+          <div className='text-[15px] font-extrabold text-text mb-5'>
+            {recModo === 'editar' ? 'Editar recorrido' : 'Registrar recorrido'}
+          </div>
+          <form
+            onSubmit={guardarRecorrido}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '120px 1fr 2fr',
+              gap: 14,
+            }}
+          >
+            <div>
+              <span className={CLS_LABEL}>N°</span>
+              {recModo === 'editar' ? (
+                <div className='text-[13px] font-extrabold text-purple-700 py-[10px]'>
+                  {recForm.numero}
+                </div>
+              ) : (
+                <select
+                  className={`${CLS_INPUT} appearance-none`}
+                  value={recForm.numero}
+                  onChange={(e) =>
+                    setRecForm((p) => ({ ...p, numero: e.target.value }))
+                  }
+                >
+                  {faltantes.map((n) => (
+                    <option key={n}>{n}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <span className={CLS_LABEL}>Nombre</span>
+              <input
+                className={CLS_INPUT}
+                required
+                value={recForm.nombre}
+                onChange={(e) =>
+                  setRecForm((p) => ({ ...p, nombre: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <span className={CLS_LABEL}>Descripción (zonas y paradas)</span>
+              <input
+                className={CLS_INPUT}
+                value={recForm.descripcion}
+                onChange={(e) =>
+                  setRecForm((p) => ({ ...p, descripcion: e.target.value }))
+                }
+              />
+            </div>
+            {recModo === 'editar' && (
+              <label
+                style={{ gridColumn: '1/-1' }}
+                className='flex items-center gap-2 text-[13px] text-text cursor-pointer'
+              >
+                <input
+                  type='checkbox'
+                  checked={recForm.activo}
+                  onChange={(e) =>
+                    setRecForm((p) => ({ ...p, activo: e.target.checked }))
+                  }
+                />
+                Recorrido activo
+              </label>
+            )}
+            <div style={{ gridColumn: '1/-1' }}>
+              <button
+                type='submit'
+                disabled={guardando}
+                className={guardando ? `${CLS_BTN} opacity-60` : CLS_BTN}
+              >
+                {guardando
+                  ? 'Guardando...'
+                  : recModo === 'editar'
+                    ? 'Guardar cambios'
+                    : 'Registrar recorrido'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <Mensaje msg={msg} />
+
+      <div className={`${CLS_CARD} mb-5`}>
+        <div className='text-[15px] font-extrabold text-text mb-4'>
+          Recorridos
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['N°', 'Recorrido', 'Descripción', 'Inscriptos', 'Estado', 'Acciones'].map(
+                (t) => (
+                  <th key={t} className={CLS_TH}>
+                    {t}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {recorridos.map((r) => (
+              <tr key={r.id_recorrido}>
+                <td className={`${CLS_TD} font-extrabold text-purple-700`}>
+                  {r.numero}
+                </td>
+                <td className={`${CLS_TD} font-bold`}>{r.nombre}</td>
+                <td className={`${CLS_TD} text-textMuted`}>
+                  {r.descripcion ?? '—'}
+                </td>
+                <td className={CLS_TD}>
+                  {
+                    inscripciones.filter(
+                      (i) => i.id_recorrido === r.id_recorrido,
+                    ).length
+                  }
+                </td>
+                <td className={CLS_TD}>
+                  <span style={badge(r.activo ? '#27AE60' : '#6B6B8A')}>
+                    {r.activo ? 'Activo' : 'Inactivo'}
+                  </span>
+                </td>
+                <td className={CLS_TD}>
+                  <button
+                    className={CLS_CHIP}
+                    onClick={() => abrirEditarRecorrido(r)}
+                  >
+                    Editar
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {recorridos.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  No hay recorridos registrados.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className={CLS_CARD}>
+        <div className='text-[15px] font-extrabold text-text mb-4'>
+          Alumnos inscriptos ({inscripciones.length})
+        </div>
+        <div className='flex gap-3 mb-4 flex-wrap'>
+          <select
+            className={`${CLS_INPUT} appearance-none`}
+            style={{ maxWidth: 380 }}
+            value={selAlumno}
+            onChange={(e) => setSelAlumno(e.target.value)}
+          >
+            <option value=''>Seleccionar alumno</option>
+            {alumnosSinTransporte.map((a) => (
+              <option key={a.id_alumno} value={a.id_alumno}>
+                {a.apellido}, {a.nombre}
+                {a.legajo ? ` · ${a.legajo}` : ''} · {textoCurso(a.cursos)}
+              </option>
+            ))}
+          </select>
+          <select
+            className={`${CLS_INPUT} appearance-none`}
+            style={{ maxWidth: 240 }}
+            value={selRecorrido}
+            onChange={(e) => setSelRecorrido(e.target.value)}
+          >
+            <option value=''>Seleccionar recorrido</option>
+            {recorridosActivos.map((r) => (
+              <option key={r.id_recorrido} value={r.id_recorrido}>
+                {r.nombre}
+              </option>
+            ))}
+          </select>
+          <button
+            className={
+              !selAlumno || !selRecorrido || guardando
+                ? `${CLS_BTN} opacity-60`
+                : CLS_BTN
+            }
+            disabled={!selAlumno || !selRecorrido || guardando}
+            onClick={inscribir}
+          >
+            {guardando ? 'Inscribiendo...' : 'Inscribir'}
+          </button>
+        </div>
+        <select
+          className={`${CLS_INPUT} appearance-none mb-4`}
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+        >
+          <option value=''>Todos los recorridos</option>
+          {recorridos.map((r) => (
+            <option key={r.id_recorrido} value={r.id_recorrido}>
+              {r.nombre}
+            </option>
+          ))}
+        </select>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['Legajo', 'Alumno', 'Curso', 'Recorrido', 'Desde', 'Acción'].map(
+                (t) => (
+                  <th key={t} className={CLS_TH}>
+                    {t}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {visibles.map((i) => (
+              <tr key={i.id_inscripcion_tra}>
+                <td className={`${CLS_TD} font-extrabold text-purple-700`}>
+                  {i.alumnos?.legajo ?? '—'}
+                </td>
+                <td className={`${CLS_TD} font-bold`}>
+                  {i.alumnos?.apellido}, {i.alumnos?.nombre}
+                </td>
+                <td className={`${CLS_TD} text-textMuted`}>
+                  {textoCurso(i.alumnos?.cursos)}
+                </td>
+                <td className={CLS_TD}>
+                  <select
+                    className='px-2 py-1 rounded-input border-2 border-border text-[12px] text-text outline-none appearance-none'
+                    value={i.id_recorrido}
+                    onChange={(e) => cambiarRecorrido(i, e.target.value)}
+                  >
+                    {recorridos
+                      .filter(
+                        (r) => r.activo || r.id_recorrido === i.id_recorrido,
+                      )
+                      .map((r) => (
+                        <option key={r.id_recorrido} value={r.id_recorrido}>
+                          {r.nombre}
+                        </option>
+                      ))}
+                  </select>
+                </td>
+                <td className={`${CLS_TD} text-textMuted`}>
+                  {fechaCorta(i.fecha_alta)}
+                </td>
+                <td className={CLS_TD}>
+                  <button className={CLS_CHIP_ROJO} onClick={() => darDeBaja(i)}>
+                    Dar de baja
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {visibles.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  {filtro
+                    ? 'No hay alumnos en este recorrido.'
+                    : 'Todavía no hay alumnos inscriptos al transporte.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TP METODOLOGÍA II · RF5 — COMEDOR (HU27, HU29)
+// ═══════════════════════════════════════════════════════════════
+interface InscripcionComedor {
+  id_inscripcion_com: number
+  id_alumno: number
+  fecha_alta: string
+  alumnos: AlumnoInscripto | null
+}
+
+async function cargarComedor() {
+  const [ins, alu] = await Promise.all([
+    supabase
+      .from('inscripciones_comedor')
+      .select(
+        `id_inscripcion_com, id_alumno, fecha_alta, ${SELECT_ALUMNO_INSCRIPTO}`,
+      )
+      .eq('activo', true)
+      .order('fecha_alta'),
+    consultarAlumnosActivos(),
+  ])
+  return {
+    inscripciones: (ins.data ?? []) as unknown as InscripcionComedor[],
+    alumnos: (alu.data ?? []) as unknown as Alumno[],
+    error: ins.error?.message ?? null,
+  }
+}
+
+function GestionComedor() {
+  const [inscripciones, setInscripciones] = useState<InscripcionComedor[]>([])
+  const [alumnos, setAlumnos] = useState<Alumno[]>([])
+  const [selAlumno, setSelAlumno] = useState('')
+  const [busqueda, setBusqueda] = useState('')
+  const [msg, setMsg] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  const aplicar = useCallback(
+    (r: Awaited<ReturnType<typeof cargarComedor>>) => {
+      setInscripciones(r.inscripciones)
+      setAlumnos(r.alumnos)
+      if (r.error) setMsg(mensajeErrorServicios(r.error))
+    },
+    [],
+  )
+  const load = () => cargarComedor().then(aplicar)
+
+  useEffect(() => {
+    cargarComedor().then(aplicar)
+  }, [aplicar])
+
+  const inscribir = async () => {
+    if (!selAlumno) return
+    setMsg('')
+    setGuardando(true)
+    const { error } = await supabase
+      .from('inscripciones_comedor')
+      .insert([{ id_alumno: Number(selAlumno) }])
+    setGuardando(false)
+    if (error) return setMsg(mensajeErrorServicios(error.message))
+    setMsg('✅ Alumno inscripto al comedor.')
+    setSelAlumno('')
+    load()
+  }
+
+  const darDeBaja = async (i: InscripcionComedor) => {
+    if (
+      !confirm(
+        `¿Dar de baja del comedor a ${i.alumnos?.apellido}, ${i.alumnos?.nombre}?`,
+      )
+    )
+      return
+    setMsg('')
+    const { error } = await supabase
+      .from('inscripciones_comedor')
+      .update({ activo: false })
+      .eq('id_inscripcion_com', i.id_inscripcion_com)
+    if (error) return setMsg(mensajeErrorServicios(error.message))
+    setMsg('✅ Inscripción al comedor dada de baja.')
+    load()
+  }
+
+  const alumnosSinComedor = alumnos.filter(
+    (a) => !inscripciones.some((i) => i.id_alumno === a.id_alumno),
+  )
+  const q = normalizarTexto(busqueda)
+  const visibles = q
+    ? inscripciones.filter((i) =>
+        normalizarTexto(
+          `${i.alumnos?.legajo ?? ''} ${i.alumnos?.apellido ?? ''} ${i.alumnos?.nombre ?? ''}`,
+        ).includes(q),
+      )
+    : inscripciones
+
+  return (
+    <div>
+      <h2 style={{ fontSize: 22, fontWeight: 900, margin: '0 0 20px' }}>
+        🍽️ Comedor
+      </h2>
+
+      <Mensaje msg={msg} />
+
+      <div className={CLS_CARD}>
+        <div className='text-[15px] font-extrabold text-text mb-4'>
+          Alumnos inscriptos ({inscripciones.length})
+        </div>
+        <div className='flex gap-3 mb-4 flex-wrap'>
+          <select
+            className={`${CLS_INPUT} appearance-none`}
+            style={{ maxWidth: 420 }}
+            value={selAlumno}
+            onChange={(e) => setSelAlumno(e.target.value)}
+          >
+            <option value=''>Seleccionar alumno</option>
+            {alumnosSinComedor.map((a) => (
+              <option key={a.id_alumno} value={a.id_alumno}>
+                {a.apellido}, {a.nombre}
+                {a.legajo ? ` · ${a.legajo}` : ''} · {textoCurso(a.cursos)}
+              </option>
+            ))}
+          </select>
+          <button
+            className={
+              !selAlumno || guardando ? `${CLS_BTN} opacity-60` : CLS_BTN
+            }
+            disabled={!selAlumno || guardando}
+            onClick={inscribir}
+          >
+            {guardando ? 'Inscribiendo...' : 'Inscribir'}
+          </button>
+        </div>
+        <input
+          className={`${CLS_INPUT} mb-4`}
+          placeholder='🔍 Buscar por legajo, apellido o nombre'
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+        />
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['Legajo', 'Alumno', 'Curso', 'Desde', 'Acción'].map((t) => (
+                <th key={t} className={CLS_TH}>
+                  {t}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visibles.map((i) => (
+              <tr key={i.id_inscripcion_com}>
+                <td className={`${CLS_TD} font-extrabold text-purple-700`}>
+                  {i.alumnos?.legajo ?? '—'}
+                </td>
+                <td className={`${CLS_TD} font-bold`}>
+                  {i.alumnos?.apellido}, {i.alumnos?.nombre}
+                </td>
+                <td className={`${CLS_TD} text-textMuted`}>
+                  {textoCurso(i.alumnos?.cursos)}
+                </td>
+                <td className={`${CLS_TD} text-textMuted`}>
+                  {fechaCorta(i.fecha_alta)}
+                </td>
+                <td className={CLS_TD}>
+                  <button className={CLS_CHIP_ROJO} onClick={() => darDeBaja(i)}>
+                    Dar de baja
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {visibles.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className='py-6 text-center text-[13px] text-textMuted'
+                >
+                  {q
+                    ? 'No se encontró ningún alumno inscripto con esa búsqueda.'
+                    : 'Todavía no hay alumnos inscriptos al comedor.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

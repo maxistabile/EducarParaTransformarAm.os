@@ -20,6 +20,7 @@ import { createClient } from '@supabase/supabase-js'
 import { Link, useNavigate } from 'react-router-dom'
 import type { User } from '@supabase/supabase-js'
 import type { FormEvent } from 'react'
+import { textoHorario, mensajeErrorServicios } from './reglasServicios'
 
 // ═══════════════════════════════════════════════════════════════
 //  SUPABASE CLIENT
@@ -101,6 +102,42 @@ interface ActividadEx {
   inscriptos: number
   inscripto: boolean
 }
+
+// TP Metodología II · RF4 / RF5 — deportes por grupo, transporte y comedor
+interface GrupoPortal {
+  id_grupo: number
+  dias: string[]
+  hora_inicio: string
+  hora_fin: string
+  cupo: number
+  actividades_extracurriculares: { nombre: string; activo: boolean } | null
+  docentes: { usuarios: { nombre: string; apellido: string } | null } | null
+  ocupados: number // -1 = grupo de otro nivel donde ya está inscripto
+  idInscripcion: number | null
+}
+
+interface RecorridoPortal {
+  id_recorrido: number
+  nombre: string
+  descripcion: string | null
+}
+
+interface ServiciosAlumno {
+  grupos: GrupoPortal[]
+  recorridos: RecorridoPortal[]
+  transporte: { id_inscripcion_tra: number; id_recorrido: number } | null
+  comedor: { id_inscripcion_com: number } | null
+}
+
+const SERVICIOS_VACIOS: ServiciosAlumno = {
+  grupos: [],
+  recorridos: [],
+  transporte: null,
+  comedor: null,
+}
+
+const SELECT_GRUPO_PORTAL =
+  'id_grupo, dias, hora_inicio, hora_fin, cupo, actividades_extracurriculares(nombre, activo), docentes(usuarios(nombre, apellido))'
 
 // ═══════════════════════════════════════════════════════════════
 //  HELPERS
@@ -315,6 +352,10 @@ export default function StudentPortal() {
   const [asistStats, setAsistStats] = useState<AsistenciaStats | null>(null)
   const [actividades, setActividades] = useState<ActividadEx[]>([])
   const [actMsg, setActMsg] = useState('')
+  const [servicios, setServicios] = useState<ServiciosAlumno>(SERVICIOS_VACIOS)
+  const [srvMsg, setSrvMsg] = useState('')
+  const [srvOcupado, setSrvOcupado] = useState(false)
+  const [selRecorrido, setSelRecorrido] = useState('')
   const [activeNav, setActiveNav] = useState('inicio')
   const [loading, setLoading] = useState(true)
 
@@ -387,6 +428,7 @@ export default function StudentPortal() {
       a ? loadHorarioHoy(a.id_curso) : Promise.resolve(),
       a ? loadAsistencias(a.id_alumno) : Promise.resolve(),
       a ? loadActividades(a.id_alumno) : Promise.resolve(),
+      a ? loadServicios(a) : Promise.resolve(),
     ])
   }
 
@@ -457,6 +499,153 @@ export default function StudentPortal() {
       .eq('id_actividad', id_actividad)
       .eq('id_alumno', alumno.id_alumno)
     await loadActividades(alumno.id_alumno)
+  }
+
+  // TP Metodología II · RF4 / RF5 — grupos de su nivel, transporte y comedor
+  async function loadServicios(a: Alumno) {
+    const nivel = a.cursos?.nivel
+    const [gru, mias, rec, tra, com] = await Promise.all([
+      nivel
+        ? supabase
+            .from('grupos_deportivos')
+            .select(SELECT_GRUPO_PORTAL)
+            .eq('nivel', nivel)
+            .eq('activo', true)
+        : Promise.resolve({ data: [] }),
+      supabase
+        .from('inscripciones_deportivas')
+        .select(`id_inscripcion_dep, grupos_deportivos(${SELECT_GRUPO_PORTAL})`)
+        .eq('id_alumno', a.id_alumno)
+        .eq('activo', true),
+      supabase
+        .from('recorridos')
+        .select('id_recorrido, nombre, descripcion')
+        .eq('activo', true)
+        .order('numero'),
+      supabase
+        .from('inscripciones_transporte')
+        .select('id_inscripcion_tra, id_recorrido')
+        .eq('id_alumno', a.id_alumno)
+        .eq('activo', true)
+        .maybeSingle(),
+      supabase
+        .from('inscripciones_comedor')
+        .select('id_inscripcion_com')
+        .eq('id_alumno', a.id_alumno)
+        .eq('activo', true)
+        .maybeSingle(),
+    ])
+    type GrupoBase = Omit<GrupoPortal, 'ocupados' | 'idInscripcion'>
+    const delNivel = ((gru.data ?? []) as unknown as GrupoBase[]).filter(
+      (g) => g.actividades_extracurriculares?.activo !== false,
+    )
+    const ids = delNivel.map((g) => g.id_grupo)
+    const { data: insc } = ids.length
+      ? await supabase
+          .from('inscripciones_deportivas')
+          .select('id_grupo')
+          .eq('activo', true)
+          .in('id_grupo', ids)
+      : { data: [] }
+    const propias = (mias.data ?? []) as unknown as {
+      id_inscripcion_dep: number
+      grupos_deportivos: GrupoBase | null
+    }[]
+    const grupos: GrupoPortal[] = delNivel.map((g) => ({
+      ...g,
+      ocupados: (insc ?? []).filter(
+        (i: { id_grupo: number }) => i.id_grupo === g.id_grupo,
+      ).length,
+      idInscripcion:
+        propias.find((m) => m.grupos_deportivos?.id_grupo === g.id_grupo)
+          ?.id_inscripcion_dep ?? null,
+    }))
+    // Deportes en los que ya participa aunque el grupo sea de otro nivel
+    propias.forEach((m) => {
+      if (m.grupos_deportivos && !ids.includes(m.grupos_deportivos.id_grupo))
+        grupos.push({
+          ...m.grupos_deportivos,
+          ocupados: -1,
+          idInscripcion: m.id_inscripcion_dep,
+        })
+    })
+    grupos.sort((x, y) =>
+      (x.actividades_extracurriculares?.nombre ?? '').localeCompare(
+        y.actividades_extracurriculares?.nombre ?? '',
+      ),
+    )
+    setServicios({
+      grupos,
+      recorridos: (rec.data ?? []) as RecorridoPortal[],
+      transporte: tra.data ?? null,
+      comedor: com.data ?? null,
+    })
+  }
+
+  // Ejecuta una inscripción o baja y vuelve a cargar los servicios
+  async function operarServicio(accion: () => PromiseLike<{ error: { message: string } | null }>) {
+    if (!alumno) return
+    setSrvMsg('')
+    setSrvOcupado(true)
+    const { error } = await accion()
+    setSrvOcupado(false)
+    if (error) setSrvMsg(mensajeErrorServicios(error.message))
+    await loadServicios(alumno)
+  }
+
+  const inscribirseDeporte = (idGrupo: number) =>
+    operarServicio(() =>
+      supabase
+        .from('inscripciones_deportivas')
+        .insert([{ id_alumno: alumno?.id_alumno, id_grupo: idGrupo }]),
+    )
+
+  const bajaDeporte = (idInscripcion: number, deporte: string) => {
+    if (!confirm(`¿Dar de baja la inscripción a ${deporte}?`)) return
+    operarServicio(() =>
+      supabase
+        .from('inscripciones_deportivas')
+        .update({ activo: false })
+        .eq('id_inscripcion_dep', idInscripcion),
+    )
+  }
+
+  const inscribirseTransporte = () => {
+    if (!selRecorrido) return
+    operarServicio(() =>
+      supabase.from('inscripciones_transporte').insert([
+        { id_alumno: alumno?.id_alumno, id_recorrido: Number(selRecorrido) },
+      ]),
+    ).then(() => setSelRecorrido(''))
+  }
+
+  const bajaTransporte = () => {
+    const t = servicios.transporte
+    if (!t || !confirm('¿Dar de baja el servicio de transporte?')) return
+    operarServicio(() =>
+      supabase
+        .from('inscripciones_transporte')
+        .update({ activo: false })
+        .eq('id_inscripcion_tra', t.id_inscripcion_tra),
+    )
+  }
+
+  const inscribirseComedor = () =>
+    operarServicio(() =>
+      supabase
+        .from('inscripciones_comedor')
+        .insert([{ id_alumno: alumno?.id_alumno }]),
+    )
+
+  const bajaComedor = () => {
+    const c = servicios.comedor
+    if (!c || !confirm('¿Dar de baja el servicio de comedor?')) return
+    operarServicio(() =>
+      supabase
+        .from('inscripciones_comedor')
+        .update({ activo: false })
+        .eq('id_inscripcion_com', c.id_inscripcion_com),
+    )
   }
 
   async function loadCalificaciones(idAlumno: number) {
@@ -1303,9 +1492,9 @@ export default function StudentPortal() {
                 🎨 Servicios extracurriculares
               </div>
               <p className='text-[13px] text-textMuted m-0 mb-5 leading-relaxed'>
-                Inscribite a los talleres de idiomas y a las disciplinas
-                deportivas. Las actividades sin cupo disponible quedan
-                bloqueadas.
+                Inscribite a los talleres de idiomas, a los deportes y a los
+                servicios de transporte y comedor. Las actividades sin cupo
+                disponible quedan bloqueadas.
               </p>
 
               {actMsg && (
@@ -1314,7 +1503,7 @@ export default function StudentPortal() {
                 </div>
               )}
 
-              {(['Idioma', 'Deporte'] as const).map((tipo) => {
+              {(['Idioma'] as const).map((tipo) => {
                 const items = actividades.filter((a) => a.tipo === tipo)
                 if (items.length === 0) return null
                 return (
@@ -1396,6 +1585,191 @@ export default function StudentPortal() {
                   </div>
                 )
               })}
+
+              {/* TP Metodología II · RF4 — Deportes por grupo de nivel y horario */}
+              {srvMsg && (
+                <div className='bg-[#E74C3C12] border border-red/25 rounded-[8px] px-3.5 py-2.5 text-xs text-red font-bold mb-4'>
+                  ⚠️ {srvMsg}
+                </div>
+              )}
+              <div className='mb-6'>
+                <div className='text-xs font-black text-purple-700 uppercase tracking-[0.08em] mb-1'>
+                  ⚽ Deportes
+                </div>
+                <p className='text-xs text-textMuted m-0 mb-3'>
+                  {alumno?.cursos?.nivel
+                    ? `Hasta dos deportes, en grupos de nivel ${alumno.cursos.nivel} y sin horarios superpuestos.`
+                    : 'Todavía no hay un curso asignado, por eso no se pueden mostrar los grupos del nivel.'}
+                </p>
+                <div className='grid grid-cols-2 gap-3'>
+                  {servicios.grupos.map((g) => {
+                    const deporte = g.actividades_extracurriculares?.nombre ?? 'Deporte'
+                    const inscripto = g.idInscripcion !== null
+                    const disponibles = g.cupo - g.ocupados
+                    const completo = g.ocupados >= 0 && disponibles <= 0
+                    return (
+                      <div
+                        key={g.id_grupo}
+                        className='border border-border rounded-[12px] p-4 flex flex-col gap-2'
+                      >
+                        <div className='flex justify-between items-start gap-2'>
+                          <span className='text-[15px] font-black'>{deporte}</span>
+                          {inscripto && (
+                            <span
+                              className='inline-block rounded-[20px] px-2.5 py-[3px] text-[11px] font-extrabold'
+                              style={{ background: '#27AE601A', color: '#27AE60' }}
+                            >
+                              Inscripto
+                            </span>
+                          )}
+                        </div>
+                        <span className='text-xs text-textMuted'>
+                          🕐 {textoHorario(g)}
+                        </span>
+                        <span className='text-xs text-textMuted'>
+                          Prof. {g.docentes?.usuarios?.nombre}{' '}
+                          {g.docentes?.usuarios?.apellido}
+                        </span>
+                        {!inscripto && (
+                          <span
+                            className='text-xs font-extrabold'
+                            style={{ color: completo ? '#E74C3C' : '#27AE60' }}
+                          >
+                            {completo
+                              ? 'Cupo completo'
+                              : `${disponibles} de ${g.cupo} cupos disponibles`}
+                          </span>
+                        )}
+                        {inscripto ? (
+                          <button
+                            disabled={srvOcupado}
+                            className='mt-1 bg-transparent border border-red rounded-[8px] px-3.5 py-[7px] text-xs font-bold text-red cursor-pointer font-[inherit]'
+                            onClick={() =>
+                              bajaDeporte(g.idInscripcion as number, deporte)
+                            }
+                          >
+                            Dar de baja
+                          </button>
+                        ) : (
+                          <button
+                            disabled={completo || srvOcupado}
+                            className={`mt-1 border rounded-[8px] px-3.5 py-[7px] text-xs font-bold font-[inherit] transition-all
+                              ${
+                                completo
+                                  ? 'bg-border border-border text-textMuted cursor-not-allowed'
+                                  : 'bg-purple-700 border-purple-700 text-white cursor-pointer'
+                              }`}
+                            onClick={() => inscribirseDeporte(g.id_grupo)}
+                          >
+                            {completo ? 'Sin cupo' : 'Inscribirme'}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                {servicios.grupos.length === 0 && alumno?.cursos?.nivel && (
+                  <div className='text-[13px] text-textMuted'>
+                    Todavía no hay grupos deportivos para el nivel{' '}
+                    {alumno.cursos.nivel}.
+                  </div>
+                )}
+              </div>
+
+              {/* TP Metodología II · RF5 — Transporte y comedor */}
+              <div className='text-xs font-black text-purple-700 uppercase tracking-[0.08em] mb-3'>
+                🚌 Servicios
+              </div>
+              <div className='grid grid-cols-2 gap-3 mb-6'>
+                <div className='border border-border rounded-[12px] p-4 flex flex-col gap-2'>
+                  <span className='text-[15px] font-black'>🚌 Transporte</span>
+                  {servicios.transporte ? (
+                    <>
+                      <span className='text-xs text-textMuted'>
+                        Recorrido:{' '}
+                        <strong>
+                          {servicios.recorridos.find(
+                            (r) =>
+                              r.id_recorrido ===
+                              servicios.transporte?.id_recorrido,
+                          )?.nombre ?? 'Asignado'}
+                        </strong>
+                      </span>
+                      <span className='text-xs text-textMuted'>
+                        {
+                          servicios.recorridos.find(
+                            (r) =>
+                              r.id_recorrido ===
+                              servicios.transporte?.id_recorrido,
+                          )?.descripcion
+                        }
+                      </span>
+                      <button
+                        disabled={srvOcupado}
+                        className='mt-1 bg-transparent border border-red rounded-[8px] px-3.5 py-[7px] text-xs font-bold text-red cursor-pointer font-[inherit]'
+                        onClick={bajaTransporte}
+                      >
+                        Dar de baja
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className='text-xs text-textMuted'>
+                        Sin inscripción. Elegí uno de los recorridos:
+                      </span>
+                      <select
+                        className='px-3 py-2 rounded-[8px] border-2 border-border text-xs text-text outline-none'
+                        value={selRecorrido}
+                        onChange={(e) => setSelRecorrido(e.target.value)}
+                      >
+                        <option value=''>Seleccionar recorrido</option>
+                        {servicios.recorridos.map((r) => (
+                          <option key={r.id_recorrido} value={r.id_recorrido}>
+                            {r.nombre}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        disabled={!selRecorrido || srvOcupado}
+                        className={`mt-1 border rounded-[8px] px-3.5 py-[7px] text-xs font-bold font-[inherit]
+                          ${
+                            !selRecorrido
+                              ? 'bg-border border-border text-textMuted cursor-not-allowed'
+                              : 'bg-purple-700 border-purple-700 text-white cursor-pointer'
+                          }`}
+                        onClick={inscribirseTransporte}
+                      >
+                        Inscribirme
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className='border border-border rounded-[12px] p-4 flex flex-col gap-2'>
+                  <span className='text-[15px] font-black'>🍽️ Comedor</span>
+                  <span className='text-xs text-textMuted'>
+                    {servicios.comedor
+                      ? 'Inscripto en el servicio de comedor.'
+                      : 'Sin inscripción al servicio de comedor.'}
+                  </span>
+                  {servicios.comedor ? (
+                    <button
+                      disabled={srvOcupado}
+                      className='mt-1 bg-transparent border border-red rounded-[8px] px-3.5 py-[7px] text-xs font-bold text-red cursor-pointer font-[inherit]'
+                      onClick={bajaComedor}
+                    >
+                      Dar de baja
+                    </button>
+                  ) : (
+                    <button
+                      disabled={srvOcupado}
+                      className='mt-1 border rounded-[8px] px-3.5 py-[7px] text-xs font-bold font-[inherit] bg-purple-700 border-purple-700 text-white cursor-pointer'
+                      onClick={inscribirseComedor}
+                    >
+                      Inscribirme
+                    </button>
+                  )}
+                </div>
+              </div>
 
               {actividades.length === 0 && (
                 <div className='flex items-center justify-center py-8 text-textMuted text-[13px]'>
