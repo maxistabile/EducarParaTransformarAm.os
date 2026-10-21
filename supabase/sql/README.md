@@ -16,6 +16,7 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa12_modulo_academico.sql` | TP Met. II · RF3 + RF2.5 (HU3–HU6, HU15–HU19) | Tabla `niveles` (solo 3) con clave foránea desde `cursos`; sin cursos, materias ni asignaciones duplicados; horarios sin superposición por curso |
 | `etapa13_correccion_duplicados.sql` | Corrección de la etapa 12 | Compara textos normalizados (espacios, tildes, ñ, mayúsculas); borra duplicados sin uso; unifica los grados con la lista oficial; muestra el resultado como tabla |
 | `etapa14_deportes_servicios.sql` | TP Met. II · RF4 y RF5 (HU21–HU29) | Grupos deportivos por nivel y horario con profesor responsable; máximo 2 deportes sin cruces; 4 recorridos de transporte; comedor; bajas que conservan historial |
+| `etapa15_notificaciones_inscripciones.sql` | TP Met. II · RF9 (HU40) | Aviso automático al padre al inscribir, cambiar o dar de baja a su hijo en deportes, transporte o comedor (patrón Observer con triggers) |
 
 ## Pasos manuales adicionales
 

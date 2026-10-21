@@ -63,8 +63,8 @@ create table if not exists grupos_deportivos (
   constraint chk_grupo_cupo    check (cupo between 1 and 200),
   constraint chk_grupo_dias    check (
     cardinality(dias) between 1 and 6
-    and dias <@ array['Lunes', 'Martes', E'Miércoles', 'Jueves',
-                      'Viernes', E'Sábado']::varchar[])
+    and dias <@ array['Lunes', 'Martes', E'Mi\u00e9rcoles', 'Jueves',
+                      'Viernes', E'S\u00e1bado']::varchar[])
 );
 
 -- Dos rangos se superponen si comparten un dia y se cruzan las horas

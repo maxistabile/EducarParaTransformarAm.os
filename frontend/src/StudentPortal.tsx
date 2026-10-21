@@ -21,6 +21,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import type { User } from '@supabase/supabase-js'
 import type { FormEvent } from 'react'
 import { textoHorario, mensajeErrorServicios } from './reglasServicios'
+import { materiasConProfesor } from './reportes'
+import type { AsignacionR, HorarioR } from './reportes'
 
 // ═══════════════════════════════════════════════════════════════
 //  SUPABASE CLIENT
@@ -356,6 +358,10 @@ export default function StudentPortal() {
   const [srvMsg, setSrvMsg] = useState('')
   const [srvOcupado, setSrvOcupado] = useState(false)
   const [selRecorrido, setSelRecorrido] = useState('')
+  // TP Metodología II · RF7.2 — profesores por materia
+  const [materiasCurso, setMateriasCurso] = useState<
+    ReturnType<typeof materiasConProfesor>
+  >([])
   const [activeNav, setActiveNav] = useState('inicio')
   const [loading, setLoading] = useState(true)
 
@@ -429,6 +435,7 @@ export default function StudentPortal() {
       a ? loadAsistencias(a.id_alumno) : Promise.resolve(),
       a ? loadActividades(a.id_alumno) : Promise.resolve(),
       a ? loadServicios(a) : Promise.resolve(),
+      a ? loadMateriasCurso(a.id_curso) : Promise.resolve(),
     ])
   }
 
@@ -580,6 +587,31 @@ export default function StudentPortal() {
       transporte: tra.data ?? null,
       comedor: com.data ?? null,
     })
+  }
+
+  // TP Metodología II · RF7.2 — materias del curso con su profesor y horarios
+  async function loadMateriasCurso(idCurso: number | null) {
+    if (!idCurso) {
+      setMateriasCurso([])
+      return
+    }
+    const [{ data: asig }, { data: hor }] = await Promise.all([
+      supabase
+        .from('asignaciones')
+        .select('id_asignacion, materias(nombre), docentes(usuarios(nombre, apellido))')
+        .eq('id_curso', idCurso)
+        .eq('activo', true),
+      supabase
+        .from('horarios')
+        .select('id_asignacion, dia_semana, hora_inicio, hora_fin, asignaciones!inner(id_curso)')
+        .eq('asignaciones.id_curso', idCurso),
+    ])
+    setMateriasCurso(
+      materiasConProfesor(
+        (asig ?? []) as unknown as AsignacionR[],
+        (hor ?? []) as unknown as HorarioR[],
+      ),
+    )
   }
 
   // Ejecuta una inscripción o baja y vuelve a cargar los servicios
@@ -1481,6 +1513,37 @@ export default function StudentPortal() {
                     </div>
                   </div>
                 ))
+              )}
+            </div>
+          )}
+
+          {/* TP Metodología II · RF7.2 — Materias y profesores de la semana */}
+          {activeNav === 'horario' && (
+            <div className='bg-white rounded-card p-6 shadow-card border border-border mt-5'>
+              <div className='text-[15px] font-extrabold text-text mb-5 flex items-center gap-2'>
+                📚 Materias, profesores y horarios de la semana
+              </div>
+              {materiasCurso.length === 0 ? (
+                <div className='text-[13px] text-textMuted'>
+                  Todavía no hay materias cargadas para el curso.
+                </div>
+              ) : (
+                <div className='flex flex-col gap-2'>
+                  {materiasCurso.map((m) => (
+                    <div
+                      key={`${m.materia}-${m.profesor}`}
+                      className='border border-border rounded-[12px] px-4 py-3'
+                    >
+                      <div className='font-black text-[14px]'>{m.materia}</div>
+                      <div className='text-[13px] text-textMuted mt-0.5'>
+                        Prof. {m.profesor}
+                      </div>
+                      <div className='text-xs text-textMuted mt-0.5'>
+                        🕐 {m.horarios}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}

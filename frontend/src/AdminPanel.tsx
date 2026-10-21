@@ -16,6 +16,27 @@ import {
   textoCurso,
   mensajeErrorServicios,
 } from './reglasServicios'
+import {
+  construirReporte,
+  materiasConProfesor,
+  nombrePersona,
+  compararCursos,
+  tablaACSV,
+} from './reportes'
+import type {
+  AlumnoR,
+  AsignacionR,
+  HorarioR,
+  GrupoR,
+  CursoR,
+  MateriaR,
+  DocenteR,
+  RecorridoR,
+  DatosReportes,
+  TipoReporte,
+  FiltrosReporte,
+  TablaReporte,
+} from './reportes'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL as string,
@@ -317,6 +338,7 @@ const NAV_ADMIN = [
   { key: 'deportes', icon: '⚽', label: 'Deportes' },
   { key: 'transporte', icon: '🚌', label: 'Transporte' },
   { key: 'comedor', icon: '🍽️', label: 'Comedor' },
+  { key: 'reportes', icon: '📊', label: 'Reportes' },
   { key: 'reservas', icon: '🏟️', label: 'Reservas' },
   { key: 'mensajes', icon: '✉️', label: 'Mensajes' },
   { key: 'noticias', icon: '📰', label: 'Noticias' },
@@ -327,6 +349,7 @@ const NAV_ADMIN = [
 
 const NAV_DOCENTE = [
   { key: 'dashboard', icon: '📊', label: 'Dashboard' },
+  { key: 'misclases', icon: '🗓️', label: 'Mis materias y horarios' },
   { key: 'asistencia', icon: '📅', label: 'Tomar asistencia' },
   { key: 'calificaciones', icon: '📝', label: 'Calificaciones' },
   { key: 'amonestaciones', icon: '⚠️', label: 'Amonestaciones' },
@@ -612,6 +635,7 @@ export default function AdminPanel() {
           {activeNav === 'deportes' && esAdmin && <GestionDeportes />}
           {activeNav === 'transporte' && esAdmin && <GestionTransporte />}
           {activeNav === 'comedor' && esAdmin && <GestionComedor />}
+          {activeNav === 'reportes' && esAdmin && <ReportesDireccion />}
           {activeNav === 'reservas' && <GestionReservas userId={user.id} />}
           {activeNav === 'noticias' && esAdmin && (
             <GestionNoticias userId={user.id} />
@@ -629,6 +653,9 @@ export default function AdminPanel() {
           )}
           {activeNav === 'amonestaciones' && !esAdmin && (
             <GestionAmonestaciones userId={user.id} />
+          )}
+          {activeNav === 'misclases' && !esAdmin && (
+            <MisClasesDocente userId={user.id} />
           )}
           {activeNav === 'legajos' && !esAdmin && (
             <LegajosDocente userId={user.id} />
@@ -2765,6 +2792,9 @@ function LegajoAlumno({
           </div>
         </div>
       </div>
+
+      {/* TP Metodología II · RF7.1 — Ficha integral */}
+      <FichaIntegralAlumno idAlumno={idAlumno} />
 
       {/* Historial de calificaciones */}
       <div className='bg-white rounded-card p-6 shadow-card border border-border mb-5'>
@@ -8953,6 +8983,590 @@ function GestionComedor() {
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TP METODOLOGÍA II · RF7.1 — FICHA INTEGRAL DEL ALUMNO (HU30)
+//  Curso, materias con su profesor y horarios, deportes, transporte
+//  y comedor. Se muestra en el legajo y en el reporte por alumno.
+// ═══════════════════════════════════════════════════════════════
+const SELECT_ASIGNACION_REPORTE =
+  'id_asignacion, id_docente, id_materia, id_curso, materias(nombre), docentes(usuarios(nombre, apellido)), cursos(nivel, grado_anio, division)'
+
+async function cargarFichaIntegral(idAlumno: number) {
+  const { data: al } = await supabase
+    .from('alumnos')
+    .select(
+      'id_alumno, legajo, nombre, apellido, id_curso, cursos(nivel, grado_anio, division)',
+    )
+    .eq('id_alumno', idAlumno)
+    .maybeSingle()
+  const idCurso = (al as { id_curso: number | null } | null)?.id_curso ?? -1
+  const [asig, hor, dep, tra, com] = await Promise.all([
+    supabase
+      .from('asignaciones')
+      .select(SELECT_ASIGNACION_REPORTE)
+      .eq('id_curso', idCurso)
+      .eq('activo', true),
+    supabase
+      .from('horarios')
+      .select('id_asignacion, dia_semana, hora_inicio, hora_fin, asignaciones!inner(id_curso)')
+      .eq('asignaciones.id_curso', idCurso),
+    supabase
+      .from('inscripciones_deportivas')
+      .select(
+        'id_inscripcion_dep, grupos_deportivos(id_grupo, dias, hora_inicio, hora_fin, nivel, actividades_extracurriculares(nombre), docentes(usuarios(nombre, apellido)))',
+      )
+      .eq('id_alumno', idAlumno)
+      .eq('activo', true),
+    supabase
+      .from('inscripciones_transporte')
+      .select('fecha_alta, recorridos(nombre, descripcion)')
+      .eq('id_alumno', idAlumno)
+      .eq('activo', true)
+      .maybeSingle(),
+    supabase
+      .from('inscripciones_comedor')
+      .select('fecha_alta')
+      .eq('id_alumno', idAlumno)
+      .eq('activo', true)
+      .maybeSingle(),
+  ])
+  return {
+    alumno: al as unknown as AlumnoR | null,
+    materias: materiasConProfesor(
+      (asig.data ?? []) as unknown as AsignacionR[],
+      (hor.data ?? []) as unknown as HorarioR[],
+    ),
+    deportes: ((dep.data ?? []) as unknown as {
+      id_inscripcion_dep: number
+      grupos_deportivos: GrupoR | null
+    }[])
+      .map((x) => x.grupos_deportivos)
+      .filter((g): g is GrupoR => !!g),
+    transporte: tra.data as unknown as {
+      fecha_alta: string
+      recorridos: { nombre: string; descripcion: string | null } | null
+    } | null,
+    comedor: com.data as { fecha_alta: string } | null,
+    error: asig.error?.message ?? dep.error?.message ?? null,
+  }
+}
+
+function FichaIntegralAlumno({
+  idAlumno,
+  mostrarNombre = false,
+}: {
+  idAlumno: number
+  mostrarNombre?: boolean
+}) {
+  const [ficha, setFicha] = useState<Awaited<
+    ReturnType<typeof cargarFichaIntegral>
+  > | null>(null)
+
+  const aplicar = useCallback(
+    (r: Awaited<ReturnType<typeof cargarFichaIntegral>>) => setFicha(r),
+    [],
+  )
+  useEffect(() => {
+    cargarFichaIntegral(idAlumno).then(aplicar)
+  }, [idAlumno, aplicar])
+
+  if (!ficha)
+    return (
+      <div className={`${CLS_CARD} mb-5 text-[13px] text-textMuted`}>
+        Cargando ficha integral...
+      </div>
+    )
+
+  const a = ficha.alumno
+  return (
+    <div className={`${CLS_CARD} mb-5`}>
+      <div className='text-[15px] font-extrabold text-text mb-1'>
+        Ficha integral
+        {mostrarNombre && a && ` · ${a.apellido}, ${a.nombre}`}
+      </div>
+      <div className='text-[13px] text-textMuted mb-5'>
+        {mostrarNombre && a?.legajo && `Legajo ${a.legajo} · `}
+        Curso: <strong>{textoCurso(a?.cursos)}</strong>
+      </div>
+
+      {ficha.error && <Mensaje msg={mensajeErrorServicios(ficha.error)} />}
+
+      <div className='text-xs font-black text-purple-700 uppercase tracking-[0.08em] mb-2'>
+        📚 Materias que cursa
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }} className='mb-6'>
+        <thead>
+          <tr>
+            {['Materia', 'Profesor', 'Horarios'].map((t) => (
+              <th key={t} className={CLS_TH}>
+                {t}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ficha.materias.map((m) => (
+            <tr key={`${m.materia}-${m.profesor}`}>
+              <td className={`${CLS_TD} font-bold`}>{m.materia}</td>
+              <td className={`${CLS_TD} text-textMuted`}>{m.profesor}</td>
+              <td className={`${CLS_TD} text-textMuted`}>{m.horarios}</td>
+            </tr>
+          ))}
+          {ficha.materias.length === 0 && (
+            <tr>
+              <td colSpan={3} className='py-4 text-[13px] text-textMuted'>
+                El curso todavía no tiene materias asignadas.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+
+      <div className='text-xs font-black text-purple-700 uppercase tracking-[0.08em] mb-2'>
+        ⚽ Deportes en los que participa
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }} className='mb-6'>
+        <thead>
+          <tr>
+            {['Deporte', 'Días y horario', 'Profesor a cargo'].map((t) => (
+              <th key={t} className={CLS_TH}>
+                {t}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ficha.deportes.map((g) => (
+            <tr key={g.id_grupo}>
+              <td className={`${CLS_TD} font-bold`}>
+                {g.actividades_extracurriculares?.nombre}
+              </td>
+              <td className={`${CLS_TD} text-textMuted`}>{textoHorario(g)}</td>
+              <td className={`${CLS_TD} text-textMuted`}>
+                {nombrePersona(g.docentes?.usuarios)}
+              </td>
+            </tr>
+          ))}
+          {ficha.deportes.length === 0 && (
+            <tr>
+              <td colSpan={3} className='py-4 text-[13px] text-textMuted'>
+                No participa en deportes.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+
+      <div className='text-xs font-black text-purple-700 uppercase tracking-[0.08em] mb-2'>
+        🚌 Servicios
+      </div>
+      <div
+        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}
+        className='text-[13px]'
+      >
+        <div>
+          <span className={CLS_LABEL}>Transporte</span>
+          {ficha.transporte ? (
+            <>
+              <strong>{ficha.transporte.recorridos?.nombre}</strong>
+              <span className='text-textMuted'>
+                {' '}
+                · desde {fechaCorta(ficha.transporte.fecha_alta)}
+              </span>
+            </>
+          ) : (
+            <span className='text-textMuted'>No usa el servicio</span>
+          )}
+        </div>
+        <div>
+          <span className={CLS_LABEL}>Comedor</span>
+          {ficha.comedor ? (
+            <>
+              <strong>Inscripto</strong>
+              <span className='text-textMuted'>
+                {' '}
+                · desde {fechaCorta(ficha.comedor.fecha_alta)}
+              </span>
+            </>
+          ) : (
+            <span className='text-textMuted'>No usa el servicio</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TP METODOLOGÍA II · RF8 — REPORTES DE LA DIRECCIÓN (HU33 a HU39)
+// ═══════════════════════════════════════════════════════════════
+async function cargarDatosReportes(): Promise<DatosReportes> {
+  const [al, cu, ma, asg, hor, doc, gru, ide, tra, rec] = await Promise.all([
+    supabase
+      .from('alumnos')
+      .select(
+        'id_alumno, legajo, nombre, apellido, id_curso, cursos(nivel, grado_anio, division)',
+      )
+      .eq('activo', true),
+    supabase.from('cursos').select('id_curso, nivel, grado_anio, division').eq('activo', true),
+    supabase.from('materias').select('id_materia, nombre').order('nombre'),
+    supabase.from('asignaciones').select(SELECT_ASIGNACION_REPORTE).eq('activo', true),
+    supabase.from('horarios').select('id_asignacion, dia_semana, hora_inicio, hora_fin'),
+    supabase.from('docentes').select('id_docente, usuarios(nombre, apellido)').eq('activo', true),
+    supabase
+      .from('grupos_deportivos')
+      .select(
+        'id_grupo, id_actividad, nivel, id_docente, dias, hora_inicio, hora_fin, actividades_extracurriculares(nombre), docentes(usuarios(nombre, apellido))',
+      ),
+    supabase.from('inscripciones_deportivas').select('id_alumno, id_grupo').eq('activo', true),
+    supabase.from('inscripciones_transporte').select('id_alumno, id_recorrido').eq('activo', true),
+    supabase.from('recorridos').select('id_recorrido, numero, nombre').order('numero'),
+  ])
+  return {
+    alumnos: (al.data ?? []) as unknown as AlumnoR[],
+    cursos: ((cu.data ?? []) as CursoR[]).sort(compararCursos),
+    materias: (ma.data ?? []) as MateriaR[],
+    asignaciones: (asg.data ?? []) as unknown as AsignacionR[],
+    horarios: (hor.data ?? []) as HorarioR[],
+    docentes: ((doc.data ?? []) as unknown as DocenteR[]).sort((a, b) =>
+      nombrePersona(a.usuarios).localeCompare(nombrePersona(b.usuarios)),
+    ),
+    grupos: (gru.data ?? []) as unknown as GrupoR[],
+    inscDeportivas: (ide.data ?? []) as { id_alumno: number; id_grupo: number }[],
+    transporte: (tra.data ?? []) as { id_alumno: number; id_recorrido: number }[],
+    recorridos: (rec.data ?? []) as RecorridoR[],
+  }
+}
+
+const TIPOS_REPORTE: { key: TipoReporte | 'alumno'; label: string }[] = [
+  { key: 'alumno', label: 'Por alumno (ficha integral)' },
+  { key: 'docente', label: 'Por docente: cursos a cargo y horarios' },
+  { key: 'curso', label: 'Listado de alumnos por curso' },
+  { key: 'materia', label: 'Listado de alumnos por materia' },
+  { key: 'docentes_nivel', label: 'Listado de docentes por nivel educativo' },
+  {
+    key: 'deporte',
+    label: 'Listado de alumnos por deporte, nivel, horario y profesor',
+  },
+  { key: 'recorrido', label: 'Listado de alumnos por recorrido de transporte' },
+]
+
+function TablaDeReporte({
+  tabla,
+  vacio,
+}: {
+  tabla: TablaReporte
+  vacio: string
+}) {
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr>
+          {tabla.columnas.map((c) => (
+            <th key={c} className={CLS_TH}>
+              {c}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {tabla.filas.map((fila, i) => (
+          <tr key={i}>
+            {fila.map((v, j) => (
+              <td key={j} className={j === 0 ? `${CLS_TD} font-bold` : CLS_TD}>
+                {v}
+              </td>
+            ))}
+          </tr>
+        ))}
+        {tabla.filas.length === 0 && (
+          <tr>
+            <td
+              colSpan={Math.max(tabla.columnas.length, 1)}
+              className='py-6 text-center text-[13px] text-textMuted'
+            >
+              {vacio}
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  )
+}
+
+function ReportesDireccion() {
+  const [datos, setDatos] = useState<DatosReportes | null>(null)
+  const [tipo, setTipo] = useState<TipoReporte | 'alumno'>('alumno')
+  const [filtros, setFiltros] = useState<FiltrosReporte>({})
+  const [idAlumno, setIdAlumno] = useState('')
+
+  const aplicar = useCallback((d: DatosReportes) => setDatos(d), [])
+  useEffect(() => {
+    cargarDatosReportes().then(aplicar)
+  }, [aplicar])
+
+  const cambiarTipo = (t: TipoReporte | 'alumno') => {
+    setTipo(t)
+    setFiltros({})
+  }
+  const filtro = (k: keyof FiltrosReporte, v: string) =>
+    setFiltros((p) => ({
+      ...p,
+      [k]: v,
+      // al cambiar de deporte o de nivel, el grupo elegido deja de valer
+      ...(k === 'id_actividad' || k === 'nivel' ? { id_grupo: '' } : {}),
+    }))
+
+  const tabla =
+    datos && tipo !== 'alumno' ? construirReporte(tipo, datos, filtros) : null
+  const etiqueta = TIPOS_REPORTE.find((t) => t.key === tipo)?.label ?? ''
+
+  const exportarCSV = () => {
+    if (!tabla) return
+    const blob = new Blob([tablaACSV(tabla)], {
+      type: 'text/csv;charset=utf-8',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${etiqueta.replace(/[^\wáéíóúñ ]/gi, '').trim().replace(/\s+/g, '_')}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const selectFiltro = (
+    k: keyof FiltrosReporte,
+    textoTodos: string,
+    opciones: { value: string | number; label: string }[],
+  ) => (
+    <select
+      className={`${CLS_INPUT} appearance-none`}
+      style={{ maxWidth: 300 }}
+      value={filtros[k] ?? ''}
+      onChange={(e) => filtro(k, e.target.value)}
+    >
+      <option value=''>{textoTodos}</option>
+      {opciones.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  )
+
+  const deportesConGrupos = datos
+    ? unicosPorId(
+        datos.grupos.map((g) => ({
+          value: g.id_actividad,
+          label: g.actividades_extracurriculares?.nombre ?? 'Deporte',
+        })),
+      )
+    : []
+
+  return (
+    <div>
+      <h2 style={{ fontSize: 22, fontWeight: 900, margin: '0 0 20px' }}>
+        📊 Reportes
+      </h2>
+
+      <div className={`${CLS_CARD} mb-5`}>
+        <span className={CLS_LABEL}>Reporte</span>
+        <select
+          className={`${CLS_INPUT} appearance-none mb-4`}
+          value={tipo}
+          onChange={(e) => cambiarTipo(e.target.value as TipoReporte | 'alumno')}
+        >
+          {TIPOS_REPORTE.map((t) => (
+            <option key={t.key} value={t.key}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+
+        {!datos ? (
+          <div className='text-[13px] text-textMuted'>Cargando datos...</div>
+        ) : (
+          <div className='flex gap-3 flex-wrap'>
+            {tipo === 'alumno' && (
+              <select
+                className={`${CLS_INPUT} appearance-none`}
+                style={{ maxWidth: 460 }}
+                value={idAlumno}
+                onChange={(e) => setIdAlumno(e.target.value)}
+              >
+                <option value=''>Seleccionar alumno</option>
+                {[...datos.alumnos]
+                  .sort((a, b) =>
+                    `${a.apellido} ${a.nombre}`.localeCompare(
+                      `${b.apellido} ${b.nombre}`,
+                    ),
+                  )
+                  .map((a) => (
+                    <option key={a.id_alumno} value={a.id_alumno}>
+                      {a.apellido}, {a.nombre}
+                      {a.legajo ? ` · ${a.legajo}` : ''} · {textoCurso(a.cursos)}
+                    </option>
+                  ))}
+              </select>
+            )}
+            {tipo === 'docente' &&
+              selectFiltro(
+                'id_docente',
+                'Seleccionar docente',
+                datos.docentes.map((d) => ({
+                  value: d.id_docente,
+                  label: nombrePersona(d.usuarios),
+                })),
+              )}
+            {(tipo === 'curso' || tipo === 'materia') &&
+              selectFiltro(
+                'id_curso',
+                'Todos los cursos',
+                datos.cursos.map((c) => ({ value: c.id_curso, label: textoCurso(c) })),
+              )}
+            {tipo === 'materia' &&
+              selectFiltro(
+                'id_materia',
+                'Todas las materias',
+                datos.materias.map((m) => ({ value: m.id_materia, label: m.nombre })),
+              )}
+            {(tipo === 'docentes_nivel' || tipo === 'deporte') &&
+              selectFiltro(
+                'nivel',
+                'Todos los niveles',
+                NIVELES_INSTITUCION.map((n) => ({ value: n, label: n })),
+              )}
+            {tipo === 'deporte' &&
+              selectFiltro('id_actividad', 'Todos los deportes', deportesConGrupos)}
+            {tipo === 'deporte' &&
+              selectFiltro(
+                'id_grupo',
+                'Todos los horarios y profesores',
+                datos.grupos
+                  .filter(
+                    (g) =>
+                      (!filtros.id_actividad ||
+                        g.id_actividad === Number(filtros.id_actividad)) &&
+                      (!filtros.nivel || g.nivel === filtros.nivel),
+                  )
+                  .map((g) => ({
+                    value: g.id_grupo,
+                    label: `${g.actividades_extracurriculares?.nombre ?? ''} · ${g.nivel} · ${textoHorario(g)} · ${nombrePersona(g.docentes?.usuarios)}`,
+                  })),
+              )}
+            {tipo === 'recorrido' &&
+              selectFiltro(
+                'id_recorrido',
+                'Todos los recorridos',
+                datos.recorridos.map((r) => ({ value: r.id_recorrido, label: r.nombre })),
+              )}
+          </div>
+        )}
+      </div>
+
+      {tipo === 'alumno' && idAlumno && (
+        <FichaIntegralAlumno idAlumno={Number(idAlumno)} mostrarNombre />
+      )}
+
+      {tabla && (
+        <div className={CLS_CARD}>
+          <div className='flex justify-between items-center mb-4 gap-3 flex-wrap'>
+            <div className='text-[15px] font-extrabold text-text'>
+              {etiqueta}{' '}
+              <span className='text-textMuted font-bold text-[13px]'>
+                · {tabla.filas.length} fila(s)
+              </span>
+            </div>
+            <button
+              className={tabla.filas.length ? CLS_CHIP : `${CLS_CHIP} opacity-50`}
+              disabled={tabla.filas.length === 0}
+              onClick={exportarCSV}
+            >
+              ⬇ Exportar a Excel (CSV)
+            </button>
+          </div>
+          <TablaDeReporte
+            tabla={tabla}
+            vacio={
+              tipo === 'docente' && !filtros.id_docente
+                ? 'Elegí un docente para ver sus cursos y horarios.'
+                : 'No hay datos para los filtros elegidos.'
+            }
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+const unicosPorId = (xs: { value: number; label: string }[]) =>
+  [...new Map(xs.map((x) => [x.value, x])).values()].sort((a, b) =>
+    a.label.localeCompare(b.label),
+  )
+
+// ═══════════════════════════════════════════════════════════════
+//  TP METODOLOGÍA II · RF7.3 — MIS MATERIAS Y HORARIOS (Docente, HU32)
+// ═══════════════════════════════════════════════════════════════
+function MisClasesDocente({ userId }: { userId: string }) {
+  const [datos, setDatos] = useState<DatosReportes | null>(null)
+  const [idDocente, setIdDocente] = useState<number | null>(null)
+  const [listo, setListo] = useState(false)
+
+  const aplicar = useCallback(
+    (d: DatosReportes, id: number | null) => {
+      setDatos(d)
+      setIdDocente(id)
+      setListo(true)
+    },
+    [],
+  )
+  useEffect(() => {
+    Promise.all([
+      cargarDatosReportes(),
+      supabase.from('docentes').select('id_docente').eq('id_usuario', userId).maybeSingle(),
+    ]).then(([d, { data }]) =>
+      aplicar(d, (data as { id_docente: number } | null)?.id_docente ?? null),
+    )
+  }, [userId, aplicar])
+
+  const tabla =
+    datos && idDocente !== null
+      ? construirReporte('docente', datos, { id_docente: String(idDocente) })
+      : null
+  const cursos = tabla ? new Set(tabla.filas.map((f) => `${f[0]} ${f[1]}`)).size : 0
+
+  return (
+    <div>
+      <h2 style={{ fontSize: 22, fontWeight: 900, margin: '0 0 20px' }}>
+        🗓️ Mis materias y horarios
+      </h2>
+      <div className={CLS_CARD}>
+        {!listo ? (
+          <div className='text-[13px] text-textMuted'>Cargando...</div>
+        ) : idDocente === null ? (
+          <div className='text-[13px] text-textMuted'>
+            Tu usuario no está vinculado a un registro de docente. Pedile al
+            administrador que lo revise.
+          </div>
+        ) : (
+          <>
+            <div className='text-[13px] text-textMuted mb-4'>
+              {tabla?.filas.length ?? 0} clase(s) en {cursos} curso(s) o
+              grupo(s).
+            </div>
+            {tabla && (
+              <TablaDeReporte
+                tabla={tabla}
+                vacio='Todavía no tenés materias asignadas.'
+              />
+            )}
+          </>
+        )}
       </div>
     </div>
   )
