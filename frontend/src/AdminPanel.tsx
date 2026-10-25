@@ -37,6 +37,14 @@ import type {
   FiltrosReporte,
   TablaReporte,
 } from './reportes'
+import {
+  FORM_ALUMNO_VACIO,
+  RX_SOLO_LETRAS,
+  RX_TEL,
+  validarAlumno,
+  mensajeErrorAlumno,
+} from './validacionesAlumno'
+import type { FormAlumno } from './validacionesAlumno'
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL as string,
@@ -1828,65 +1836,6 @@ function GestionUsuarios({
 // ═══════════════════════════════════════════════════════════════
 // TP Metodología II · RF1 — formulario y validaciones del módulo Alumnos
 // (mismas reglas que la preinscripción pública de Home.tsx)
-const FORM_ALUMNO_VACIO = {
-  nombre: '',
-  apellido: '',
-  dni: '',
-  fecha_nacimiento: '',
-  id_curso: '',
-  email_padre: '',
-  obra_social: '',
-  direccion: '',
-  telefono: '',
-  email: '',
-}
-type FormAlumno = typeof FORM_ALUMNO_VACIO
-
-const RX_SOLO_LETRAS = /^[A-Za-zÁÉÍÓÚáéíóúÑñÜü][A-Za-zÁÉÍÓÚáéíóúÑñÜü\s'-]*$/
-const RX_EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/
-const RX_TEL = /^[\d\s()+-]+$/
-
-function validarAlumno(f: FormAlumno): string | null {
-  const nombre = f.nombre.trim()
-  const apellido = f.apellido.trim()
-  if (nombre.length < 2 || !RX_SOLO_LETRAS.test(nombre))
-    return 'El nombre debe tener al menos 2 caracteres y solo letras.'
-  if (apellido.length < 2 || !RX_SOLO_LETRAS.test(apellido))
-    return 'El apellido debe tener al menos 2 caracteres y solo letras.'
-  if (!/^\d{7,9}$/.test(f.dni.trim()))
-    return 'El DNI debe tener entre 7 y 9 dígitos numéricos (sin puntos).'
-  if (!f.fecha_nacimiento) return 'Ingresá la fecha de nacimiento.'
-  const fnac = new Date(f.fecha_nacimiento + 'T00:00:00')
-  if (isNaN(fnac.getTime()) || fnac > new Date())
-    return 'La fecha de nacimiento no es válida.'
-  // Regla de negocio: cada alumno debe pertenecer a un único curso
-  if (!f.id_curso) return 'Seleccioná el curso del alumno.'
-  const email = f.email.trim()
-  if (email && !RX_EMAIL.test(email))
-    return 'Ingresá un email válido (ej: nombre@dominio.com).'
-  const tel = f.telefono.trim()
-  if (tel) {
-    if (!RX_TEL.test(tel))
-      return 'El teléfono solo puede tener números, espacios y los signos + - ( ).'
-    const digitos = tel.replace(/\D/g, '')
-    if (digitos.length < 7 || digitos.length > 15)
-      return 'El teléfono debe tener entre 7 y 15 dígitos.'
-  }
-  return null
-}
-
-// Traduce los errores de la base a mensajes claros para el usuario
-function mensajeErrorAlumno(raw: string): string {
-  if (/alumnos_dni_key/i.test(raw))
-    return 'Ya existe un alumno registrado con ese DNI.'
-  if (/uq_alumnos_legajo/i.test(raw))
-    return 'Ya existe un alumno con ese legajo.'
-  if (/Cupo completo/i.test(raw))
-    return 'El curso seleccionado no tiene cupo disponible.'
-  if (/Could not find the '(legajo|telefono|email)' column/i.test(raw))
-    return 'Falta correr la migración etapa9_modulo_alumnos.sql en Supabase.'
-  return 'Error: ' + raw
-}
 
 // TP Metodología II · RF2 — formulario y validaciones del módulo Profesores
 // (reutiliza las mismas expresiones que el módulo Alumnos)
