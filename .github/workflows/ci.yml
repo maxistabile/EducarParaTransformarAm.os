@@ -1,0 +1,40 @@
+# Integración Continua – Educar para Transformar (Unidad 4)
+# Se ejecuta en cada Pull Request hacia main y en cada push a main.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  verificar:
+    name: Tests y build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Lint (informativo, no bloquea)
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Pruebas unitarias
+        run: npm test
+
+      - name: Build
+        run: npm run build
