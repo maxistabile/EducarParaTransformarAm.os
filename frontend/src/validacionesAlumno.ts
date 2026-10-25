@@ -30,7 +30,7 @@ export function validarAlumno(f: FormAlumno): string | null {
     return 'El nombre debe tener al menos 2 caracteres y solo letras.'
   if (apellido.length < 2 || !RX_SOLO_LETRAS.test(apellido))
     return 'El apellido debe tener al menos 2 caracteres y solo letras.'
-  if (!/^\d{6,9}$/.test(f.dni.trim()))
+  if (!/^\d{7,9}$/.test(f.dni.trim()))
     return 'El DNI debe tener entre 7 y 9 dígitos numéricos (sin puntos).'
   if (!f.fecha_nacimiento) return 'Ingresá la fecha de nacimiento.'
   const fnac = new Date(f.fecha_nacimiento + 'T00:00:00')
