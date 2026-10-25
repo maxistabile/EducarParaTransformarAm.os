@@ -108,7 +108,7 @@ const CONTACTO = {
 // ═══════════════════════════════════════════════════════════════
 const CAROUSEL_ITEMS = [
   { label: 'Instalaciones', color: '#5B35C5', img: PLACEHOLDERS.instalaciones },
-  { label: 'Idiomas', color: '#2980B9', img: 'idiomas.png' },
+  { label: 'Idiomas', color: '#2980B9', img: 'idiomas.webp' },
   { label: 'Deportes', color: '#27AE60', img: PLACEHOLDERS.deportes },
   { label: 'Tecnología', color: '#E67E22', img: PLACEHOLDERS.tecnologia },
   { label: 'Arte', color: '#E91E8C', img: PLACEHOLDERS.arte },
@@ -327,7 +327,7 @@ export default function Home() {
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
       <section className='relative overflow-hidden h-[440px] md:h-[500px]'>
         <img
-          src={'/hero.png'}
+          src={'/hero.webp'}
           alt='Hero'
           className='absolute inset-0 w-full h-full object-cover object-center'
         />
