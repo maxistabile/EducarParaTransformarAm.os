@@ -1,0 +1,4 @@
+node_modules
+credenciales.json
+cypress/videos
+cypress/screenshots
