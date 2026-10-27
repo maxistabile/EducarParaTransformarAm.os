@@ -27,3 +27,5 @@ src/**/*.js
 *.sln
 *.sw?
 .env
+# Reporte de pruebas que genera la CI
+reporte-pruebas.xml
