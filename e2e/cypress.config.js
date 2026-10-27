@@ -2,8 +2,19 @@
 // Las pruebas se ejecutan contra la aplicación publicada en Vercel,
 // por eso no hace falta levantar el frontend ni tener el archivo .env.
 const { defineConfig } = require('cypress')
-const fs = require('fs')
-const path = require('path')
+
+// Credenciales de los usuarios de prueba. El archivo credenciales.json
+// NO se sube al repositorio (.gitignore): se crea a partir de
+// credenciales.example.json en cada computadora.
+function leerCredenciales() {
+  try {
+    return require('./credenciales.json')
+  } catch {
+    throw new Error(
+      'Falta e2e/credenciales.json: copiá credenciales.example.json y completalo.',
+    )
+  }
+}
 
 module.exports = defineConfig({
   e2e: {
@@ -13,21 +24,14 @@ module.exports = defineConfig({
     video: true,
     retries: { runMode: 1, openMode: 0 },
     setupNodeEvents(on) {
-      // Las credenciales de los usuarios de prueba se leen desde
-      // credenciales.json, que NO se sube al repositorio (.gitignore)
       on('task', {
         credenciales(rol) {
-          const archivo = path.join(__dirname, 'credenciales.json')
-          if (!fs.existsSync(archivo)) {
-            throw new Error(
-              'Falta e2e/credenciales.json: copiá credenciales.example.json y completalo.',
-            )
-          }
-          const datos = JSON.parse(fs.readFileSync(archivo, 'utf8'))
-          if (!datos[rol] || !datos[rol].email || !datos[rol].password) {
+          const todas = leerCredenciales()
+          const usuario = rol === 'admin' ? todas.admin : todas.tutor
+          if (!usuario || !usuario.email || !usuario.password) {
             throw new Error(`Faltan el email o la contraseña de "${rol}" en credenciales.json`)
           }
-          return datos[rol]
+          return usuario
         },
       })
     },
