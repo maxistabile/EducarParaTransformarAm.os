@@ -29,12 +29,25 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      - name: Lint (informativo, no bloquea)
+      - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Pruebas unitarias
-        run: npm test
+        run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=reporte-pruebas.xml
+
+      - name: Guardar reporte de pruebas (artefacto)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-pruebas
+          path: frontend/reporte-pruebas.xml
 
       - name: Build
         run: npm run build
+
+      - name: Guardar build (artefacto)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-frontend
+          path: frontend/dist
+          retention-days: 7
