@@ -6,8 +6,13 @@
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from './AppLayout'
+import AvisoActualizacion from './AvisoActualizacion'
+import Ingresar from './pantallas/Ingresar'
 import Inicio from './pantallas/Inicio'
+import Perfil from './pantallas/Perfil'
 import Proximamente from './pantallas/Proximamente'
+import ProveedorSesion from './sesion/ProveedorSesion'
+import { RutaProtegida, RutaSeccion } from './sesion/RutasProtegidas'
 
 // Etiquetas del <head> que solo existen mientras se está en la app, para
 // que el navegador no ofrezca instalarla desde la web (ver vite.config.ts).
@@ -53,15 +58,45 @@ export default function AppRoutes() {
   // El service worker y el manifiesto usan el scope /app/ (con barra)
   if (pathname === '/app') return <Navigate to='/app/' replace />
 
+  // Cuotas, pagos e inscripciones siguen como "Próximamente": no se
+  // consultan esos datos hasta tener sus permisos (RLS) y sus historias.
   return (
-    <Routes>
-      <Route element={<AppLayout />}>
-        <Route index element={<Inicio />} />
-        <Route path='cuotas' element={<Proximamente titulo='Cuotas' />} />
-        <Route path='pagos' element={<Proximamente titulo='Pagos' />} />
-        <Route path='perfil' element={<Proximamente titulo='Perfil' />} />
-        <Route path='*' element={<Navigate to='/app/' replace />} />
-      </Route>
-    </Routes>
+    <ProveedorSesion>
+      <Routes>
+        <Route path='ingresar' element={<Ingresar />} />
+        <Route element={<RutaProtegida />}>
+          <Route element={<AppLayout />}>
+            <Route index element={<Inicio />} />
+            <Route
+              path='cuotas'
+              element={
+                <RutaSeccion seccion='cuotas'>
+                  <Proximamente titulo='Cuotas' />
+                </RutaSeccion>
+              }
+            />
+            <Route
+              path='pagos'
+              element={
+                <RutaSeccion seccion='pagos'>
+                  <Proximamente titulo='Pagos' />
+                </RutaSeccion>
+              }
+            />
+            <Route
+              path='inscripciones'
+              element={
+                <RutaSeccion seccion='inscripciones'>
+                  <Proximamente titulo='Inscripciones' />
+                </RutaSeccion>
+              }
+            />
+            <Route path='perfil' element={<Perfil />} />
+            <Route path='*' element={<Navigate to='/app/' replace />} />
+          </Route>
+        </Route>
+      </Routes>
+      <AvisoActualizacion />
+    </ProveedorSesion>
   )
 }

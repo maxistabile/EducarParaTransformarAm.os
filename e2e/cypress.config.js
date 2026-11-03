@@ -27,11 +27,16 @@ module.exports = defineConfig({
       on('task', {
         credenciales(rol) {
           const todas = leerCredenciales()
-          const usuario = rol === 'admin' ? todas.admin : todas.tutor
+          const usuario = rol === 'admin' ? todas.admin : rol === 'alumno' ? todas.alumno : todas.tutor
           if (!usuario || !usuario.email || !usuario.password) {
             throw new Error(`Faltan el email o la contraseña de "${rol}" en credenciales.json`)
           }
           return usuario
+        },
+        // Para saltear (y dejar como pendientes) las pruebas de un rol sin cuenta
+        hayCredenciales(rol) {
+          const usuario = leerCredenciales()[rol]
+          return Boolean(usuario && usuario.email && usuario.password)
         },
       })
     },
