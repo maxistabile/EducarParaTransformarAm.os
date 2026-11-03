@@ -6,10 +6,10 @@
 // Usa la instancia única del cliente (Singleton, src/lib/supabase.ts).
 //
 // Manejo de errores: lo que usan las pantallas (iniciarSesion,
-// cerrarSesion, validarSesion) nunca lanza; devuelve un Resultado o un
-// EstadoSesion con el mensaje para mostrar. obtenerIdSesion y cargarPerfil
-// sí lanzan, porque solo los usa resolverSesion, que convierte cada error
-// en un estado (ver reglasAuthApp.ts).
+// cerrarSesion, validarSesion) nunca rechaza; devuelve un Resultado o un
+// EstadoSesion con el mensaje para mostrar, y la causa queda registrada en
+// la consola. obtenerIdSesion y cargarPerfil sí lanzan, porque solo los usa
+// resolverSesion, que convierte cada error en un estado (reglasAuthApp.ts).
 import { supabase } from '../lib/supabase'
 import {
   ErrorSesionInvalida,
@@ -41,35 +41,58 @@ async function cargarPerfil(idUsuario: string): Promise<PerfilUsuario | null> {
   return data as PerfilUsuario | null
 }
 
-/** Cierra la sesión solo en este dispositivo (HU42). */
-async function cerrarSesion(): Promise<Resultado> {
-  try {
-    const { error } = await supabase.auth.signOut({ scope: 'local' })
-    if (error) return { ok: false, mensaje: MENSAJES_ACCESO.errorCierre }
-    return { ok: true }
-  } catch {
-    return { ok: false, mensaje: MENSAJES_ACCESO.errorCierre }
-  }
+/**
+ * Una operación falló: se registra la causa (para diagnosticar) y se
+ * devuelve el mensaje que la pantalla le muestra al usuario.
+ */
+function fallo(operacion: string, mensaje: string, causa: unknown): Resultado {
+  console.error(`[ServicioAuth] ${operacion}:`, causa)
+  return { ok: false, mensaje }
+}
+
+/**
+ * Cierra la sesión solo en este dispositivo (HU42).
+ * Contempla los dos casos de falla de signOut: que devuelva un error
+ * (por ejemplo, el servidor no respondió bien) o que la promesa se
+ * rechace (por ejemplo, sin conexión). En ambos se registra la causa y se
+ * devuelve el mensaje; la promesa resultante no se rechaza.
+ */
+function cerrarSesion(): Promise<Resultado> {
+  return supabase.auth.signOut({ scope: 'local' }).then(
+    ({ error }): Resultado =>
+      error
+        ? fallo('cerrarSesion', MENSAJES_ACCESO.errorCierre, error)
+        : { ok: true },
+    (causa: unknown) =>
+      fallo('cerrarSesion', MENSAJES_ACCESO.errorCierre, causa),
+  )
 }
 
 export const ServicioAuth = {
   /**
    * HU41. Solo valida las credenciales: el perfil, el rol y el estado
    * activo los valida `validarSesion`, que corre al cambiar la sesión.
+   * Igual que cerrarSesion, contempla el error devuelto y el rechazo.
    */
-  async iniciarSesion(email: string, password: string): Promise<Resultado> {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      })
-      if (error) return { ok: false, mensaje: mensajeErrorIngreso(error) }
-      if (!data.user) return { ok: false, mensaje: MENSAJES_ACCESO.sinConexion }
-      return { ok: true }
-    } catch {
-      // Falla de red antes de recibir respuesta
-      return { ok: false, mensaje: MENSAJES_ACCESO.sinConexion }
-    }
+  iniciarSesion(email: string, password: string): Promise<Resultado> {
+    return supabase.auth
+      .signInWithPassword({ email: email.trim(), password })
+      .then(
+        ({ data, error }): Resultado => {
+          if (error)
+            return fallo('iniciarSesion', mensajeErrorIngreso(error), error)
+          if (!data.user)
+            return fallo(
+              'iniciarSesion',
+              MENSAJES_ACCESO.sinConexion,
+              'respuesta sin usuario',
+            )
+          return { ok: true }
+        },
+        // Falla de red antes de recibir respuesta
+        (causa: unknown) =>
+          fallo('iniciarSesion', MENSAJES_ACCESO.sinConexion, causa),
+      )
   },
 
   /** Valida la sesión guardada: perfil, rol y estado activo. */
