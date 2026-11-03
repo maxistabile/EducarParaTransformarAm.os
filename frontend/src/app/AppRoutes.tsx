@@ -22,11 +22,17 @@ const CABECERA_APP: Array<{ tag: 'link' | 'meta'; attrs: Record<string, string> 
 function agregarCabeceraApp() {
   const elementos = CABECERA_APP.map(({ tag, attrs }) => {
     const el = document.createElement(tag)
-    Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v))
+    Object.entries(attrs).forEach(([k, v]) => {
+      el.setAttribute(k, v);
+    });
     document.head.appendChild(el)
     return el
   })
-  return () => elementos.forEach((el) => el.remove())
+  return () => {
+    elementos.forEach((el) => {
+      el.remove();
+    });
+  };
 }
 
 export default function AppRoutes() {
