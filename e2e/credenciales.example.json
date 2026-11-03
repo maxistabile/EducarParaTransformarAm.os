@@ -1,4 +1,5 @@
 {
   "admin": { "email": "", "password": "" },
-  "tutor": { "email": "", "password": "" }
+  "tutor": { "email": "", "password": "" },
+  "alumno": { "email": "", "password": "" }
 }
