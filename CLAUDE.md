@@ -136,7 +136,7 @@ Reglas para Claude Code:
 
 ## 7. Parte 3 – PWA (lo que hay que construir)
 
-Fuentes: `TP-Metodologia-3.pdf` (Parte 3) y **`Plan_de_Trabajo_Proyecto_Met2_Grupo13_Amos_Web_y_Movil.docx`, secciones 10 a 17** (requerimientos RF10–RF15, RNF6–RNF10, HU41–HU66 con tareas y criterios de aceptación). **Ante cualquier duda de alcance, mandan los criterios de aceptación del plan.**
+Fuente principal: **[`docs/plan-app-movil.md`](docs/plan-app-movil.md)**, el extracto en Markdown del plan de trabajo (RF10–RF15, RNF6–RNF10 y **HU41–HU66 con sus tareas y criterios de aceptación**, en la sección 16.3). **Antes de implementar una HU, leer su fila en ese archivo. Ante cualquier duda de alcance, mandan sus criterios de aceptación.** Esta sección es solo un resumen.
 
 ### 7.1. Arquitectura (decidida en el plan)
 - La PWA es **un segundo cliente dentro del mismo proyecto React** (`frontend/`): **`vite-plugin-pwa`** (manifiesto + service worker), **mismo despliegue en Vercel**, misma CI, **misma base y mismos servicios de Supabase**. No se crean datos ni servicios paralelos.
@@ -242,8 +242,8 @@ El plan define la bitácora como una **planilla compartida en Google Drive** que
 
 En el Proyecto de Claude ("Educar Para Transformar App Movil"):
 - `TP-Metodologia-3.pdf`: enunciado del TPI (Parte 3 = PWA).
-- `Plan_de_Trabajo_Proyecto_Met2_Grupo13_Amos_Web_y_Movil.docx`: plan completo. Secciones 1–9 = web (HU1–HU40); **secciones 10–17 = PWA** (RF10–RF15, HU41–HU66 con criterios de aceptación, sprints M0–M5, patrones).
+- `Plan_de_Trabajo_Proyecto_Met2_Grupo13_Amos_Web_y_Movil.docx`: plan completo (en el repo está el extracto de la parte móvil: `docs/plan-app-movil.md`). Secciones 1–9 = web (HU1–HU40); **secciones 10–17 = PWA** (RF10–RF15, HU41–HU66 con criterios de aceptación, sprints M0–M5, patrones).
 - `Informe de avance - Sistema de gestion web - Grupo 13.docx`: decisiones de la parte web.
 - `Unidad_4_Parte_2_Grupo_13_Amos.docx`, `TP_Unidad_5_Stabile.docx`: CI/CD, calidad y pruebas.
 
-En el repo: `README.md`, `supabase/sql/README.md`, `DEPLOY_MANUAL.md` y la **Wiki** (página Home).
+En el repo: **`docs/plan-app-movil.md`** (plan de la PWA y criterios de aceptación), `docs/bitacora-ia.md`, `README.md`, `supabase/sql/README.md`, `DEPLOY_MANUAL.md` y la **Wiki** (página Home).
