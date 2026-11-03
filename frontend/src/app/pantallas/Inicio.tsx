@@ -3,11 +3,9 @@
 // sus historias (HU51 en adelante).
 import { useSesionApp } from '../sesion/contextoSesion'
 
-const TEXTO_POR_ROL = {
-  Padre:
-    'Desde esta app vas a poder consultar las cuotas, cargar los comprobantes de pago y ver las inscripciones de tus hijos.',
-  Alumno: 'Desde esta app vas a poder ver tus inscripciones.',
-}
+const TEXTO_PADRE =
+  'Desde esta app vas a poder consultar las cuotas, cargar los comprobantes de pago y ver las inscripciones de tus hijos.'
+const TEXTO_ALUMNO = 'Desde esta app vas a poder ver tus inscripciones.'
 
 export default function Inicio() {
   const { sesion } = useSesionApp()
@@ -21,7 +19,7 @@ export default function Inicio() {
       <p className='mt-1 text-xs font-bold uppercase text-textMuted'>
         {sesion.rol === 'Padre' ? 'Tutor' : 'Alumno'}
       </p>
-      <p className='mt-3 text-sm text-textMuted'>{TEXTO_POR_ROL[sesion.rol]}</p>
+      <p className='mt-3 text-sm text-textMuted'>{sesion.rol === 'Padre' ? TEXTO_PADRE : TEXTO_ALUMNO}</p>
       <p className='mt-4 rounded-input bg-purpleLight px-3 py-2 text-sm font-semibold text-purpleDark'>
         La app está en construcción.
       </p>

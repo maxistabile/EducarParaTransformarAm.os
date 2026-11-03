@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ServicioAuth } from '../../servicios/ServicioAuth'
-import type { EstadoSesion } from '../reglasAuthApp'
+import { MENSAJES_ACCESO } from '../reglasAuthApp'
+import type { EstadoSesion, Resultado } from '../reglasAuthApp'
 import { ContextoSesion } from './contextoSesion'
 
 export default function ProveedorSesion({ children }: { children: ReactNode }) {
@@ -17,12 +18,20 @@ export default function ProveedorSesion({ children }: { children: ReactNode }) {
   const validar = useCallback((mostrarCarga: boolean) => {
     const miTurno = ++turno.current
     if (mostrarCarga) setSesion({ estado: 'cargando' })
-    ServicioAuth.validarSesion().then((nuevo) => {
-      // 'sin-sesion' nunca habilita nada: se aplica aunque sea vieja,
-      // para no perder el aviso de usuario inactivo o sin perfil.
-      if (miTurno === turno.current || nuevo.estado === 'sin-sesion')
-        setSesion(nuevo)
-    })
+    ServicioAuth.validarSesion().then(
+      (nuevo) => {
+        // 'sin-sesion' nunca habilita nada: se aplica aunque sea vieja,
+        // para no perder el aviso de usuario inactivo o sin perfil.
+        if (miTurno === turno.current || nuevo.estado === 'sin-sesion')
+          setSesion(nuevo)
+      },
+      () => {
+        // validarSesion no debería rechazar; si pasa algo inesperado, no
+        // se habilita nada y se ofrece reintentar.
+        if (miTurno === turno.current)
+          setSesion({ estado: 'error', mensaje: MENSAJES_ACCESO.errorValidacion })
+      },
+    )
   }, [])
 
   useEffect(
@@ -44,20 +53,23 @@ export default function ProveedorSesion({ children }: { children: ReactNode }) {
   )
 
   // Si el cierre falla (por ejemplo, sin conexión) la sesión puede seguir
-  // guardada: se vuelve a validar y el error llega a la pantalla.
-  const salir = useCallback(async () => {
+  // guardada: se vuelve a validar y el mensaje se devuelve a la pantalla.
+  const salir = useCallback(async (): Promise<Resultado> => {
     turno.current++
-    try {
-      await ServicioAuth.cerrarSesion()
-    } catch (e) {
-      validar(false)
-      throw e
-    }
-    setSesion({ estado: 'sin-sesion', aviso: null })
+    const resultado = await ServicioAuth.cerrarSesion()
+    if (resultado.ok) setSesion({ estado: 'sin-sesion', aviso: null })
+    else validar(false)
+    return resultado
   }, [validar])
 
   const valor = useMemo(
-    () => ({ sesion, revalidar: () => validar(true), salir }),
+    () => ({
+      sesion,
+      revalidar: () => {
+        validar(true)
+      },
+      salir,
+    }),
     [sesion, validar, salir],
   )
 

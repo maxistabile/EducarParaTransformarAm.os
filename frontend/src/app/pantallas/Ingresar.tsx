@@ -4,6 +4,7 @@ import type { FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { ServicioAuth } from '../../servicios/ServicioAuth'
 import { irALaWeb } from '../navegacion'
+import { MENSAJES_ACCESO } from '../reglasAuthApp'
 import type { EstadoSesion } from '../reglasAuthApp'
 import { useSesionApp } from '../sesion/contextoSesion'
 import {
@@ -32,17 +33,25 @@ export default function Ingresar() {
   if (sesion.estado === 'error')
     return <PantallaErrorSesion mensaje={sesion.mensaje} />
 
-  const ingresar = async (e: FormEvent) => {
+  const ingresar = (e: FormEvent) => {
     e.preventDefault()
     setSesionAlEnviar(sesion)
     setError('')
-    const resultado = await ServicioAuth.iniciarSesion(email, password)
-    // Si las credenciales son correctas, ProveedorSesion valida el perfil
-    // y esta pantalla redirige según el rol.
-    if (!resultado.ok) {
-      setError(resultado.mensaje)
+    const mostrarError = (mensaje: string) => {
+      setError(mensaje)
       setSesionAlEnviar(null)
     }
+    ServicioAuth.iniciarSesion(email, password).then(
+      (resultado) => {
+        // Si las credenciales son correctas, ProveedorSesion valida el
+        // perfil y esta pantalla redirige según el rol.
+        if (!resultado.ok) mostrarError(resultado.mensaje)
+      },
+      () => {
+        // iniciarSesion no debería rechazar; por las dudas, se avisa
+        mostrarError(MENSAJES_ACCESO.sinConexion)
+      },
+    )
   }
 
   const mensaje = error || sesion.aviso
@@ -71,7 +80,9 @@ export default function Ingresar() {
               required
               autoComplete='email'
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value)
+              }}
               className={INPUT}
             />
           </label>
@@ -82,7 +93,9 @@ export default function Ingresar() {
               required
               autoComplete='current-password'
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value)
+              }}
               className={INPUT}
             />
           </label>

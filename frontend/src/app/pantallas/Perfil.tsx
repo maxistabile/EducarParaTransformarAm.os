@@ -2,6 +2,7 @@
 // Cambiar la contraseña es HU44 (próximo PR).
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { MENSAJES_ACCESO } from '../reglasAuthApp'
 import { useSesionApp } from '../sesion/contextoSesion'
 
 export default function Perfil() {
@@ -13,17 +14,24 @@ export default function Perfil() {
   if (sesion.estado !== 'app') return null
   const { perfil } = sesion
 
-  const cerrarSesion = async () => {
+  const cerrarSesion = () => {
     setSaliendo(true)
     setError('')
-    try {
-      await salir()
-      // replace: "Atrás" no vuelve a una pantalla privada
-      navigate('/app/ingresar', { replace: true })
-    } catch {
-      setError('No se pudo cerrar la sesión. Revisá tu conexión e intentá de nuevo.')
-      setSaliendo(false)
-    }
+    salir().then(
+      (resultado) => {
+        if (resultado.ok) {
+          // replace: "Atrás" no vuelve a una pantalla privada
+          navigate('/app/ingresar', { replace: true })
+          return
+        }
+        setError(resultado.mensaje)
+        setSaliendo(false)
+      },
+      () => {
+        setError(MENSAJES_ACCESO.errorCierre)
+        setSaliendo(false)
+      },
+    )
   }
 
   return (

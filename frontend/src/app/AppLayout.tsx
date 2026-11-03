@@ -7,18 +7,28 @@ import { seccionesSegunRol } from './reglasAuthApp'
 import type { Seccion } from './reglasAuthApp'
 import { useSesionApp } from './sesion/contextoSesion'
 
-const PESTANIAS: Record<Seccion, { ruta: string; texto: string; icono: string }> = {
-  inicio: { ruta: '/app/', texto: 'Inicio', icono: '🏠' },
-  cuotas: { ruta: '/app/cuotas', texto: 'Cuotas', icono: '💳' },
-  pagos: { ruta: '/app/pagos', texto: 'Pagos', icono: '🧾' },
-  inscripciones: { ruta: '/app/inscripciones', texto: 'Inscripciones', icono: '📋' },
-  perfil: { ruta: '/app/perfil', texto: 'Perfil', icono: '👤' },
+interface Pestania {
+  ruta: string
+  texto: string
+  icono: string
 }
+
+const PESTANIAS: ReadonlyMap<Seccion, Pestania> = new Map([
+  ['inicio', { ruta: '/app/', texto: 'Inicio', icono: '🏠' }],
+  ['cuotas', { ruta: '/app/cuotas', texto: 'Cuotas', icono: '💳' }],
+  ['pagos', { ruta: '/app/pagos', texto: 'Pagos', icono: '🧾' }],
+  ['inscripciones', { ruta: '/app/inscripciones', texto: 'Inscripciones', icono: '📋' }],
+  ['perfil', { ruta: '/app/perfil', texto: 'Perfil', icono: '👤' }],
+])
 
 export default function AppLayout() {
   const { sesion } = useSesionApp()
   if (sesion.estado !== 'app') return null
-  const pestanias = seccionesSegunRol(sesion.rol).map((s) => PESTANIAS[s])
+  // Solo las secciones del rol (validado en reglasAuthApp)
+  const pestanias = seccionesSegunRol(sesion.rol).flatMap((s) => {
+    const pestania = PESTANIAS.get(s)
+    return pestania ? [pestania] : []
+  })
 
   return (
     <div className='min-h-dvh min-w-[360px] bg-appFondo font-sans text-text'>

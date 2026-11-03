@@ -3,11 +3,17 @@ import {
   ErrorSesionInvalida,
   MENSAJES_ACCESO,
   destinoSegunPerfil,
+  mensajeErrorIngreso,
   puedeVerSeccion,
   resolverSesion,
   seccionesSegunRol,
 } from './reglasAuthApp'
-import type { DependenciasSesion, PerfilUsuario } from './reglasAuthApp'
+import type {
+  DependenciasSesion,
+  PerfilUsuario,
+  RolApp,
+  Seccion,
+} from './reglasAuthApp'
 
 // Padre activo; cada prueba cambia un solo dato
 const padre: PerfilUsuario = {
@@ -25,7 +31,7 @@ function dependencias(
   return {
     obtenerIdSesion: async () => 'u-1',
     cargarPerfil: async () => padre,
-    cerrarSesion: vi.fn(async () => {}),
+    cerrarSesion: vi.fn(async () => ({ ok: true as const })),
     ...cambios,
   }
 }
@@ -134,14 +140,38 @@ describe('resolverSesion: validar una sesión existente (HU41 y HU45)', () => {
     expect(deps.cerrarSesion).toHaveBeenCalledOnce()
   })
 
-  it('aunque falle el cierre de sesión, no habilita la app', async () => {
+  it('si falla el cierre de la sesión rechazada, no habilita la app y lo avisa', async () => {
     const deps = dependencias({
       cargarPerfil: async () => ({ ...padre, rol: 'Desconocido' }),
-      cerrarSesion: async () => {
-        throw new Error('sin conexión')
-      },
+      cerrarSesion: async () => ({
+        ok: false,
+        mensaje: MENSAJES_ACCESO.errorCierre,
+      }),
     })
-    expect(await resolverSesion(deps)).toMatchObject({ estado: 'sin-sesion' })
+    expect(await resolverSesion(deps)).toEqual({
+      estado: 'sin-sesion',
+      aviso: `${MENSAJES_ACCESO.rolDesconocido} ${MENSAJES_ACCESO.errorCierre}`,
+    })
+  })
+})
+
+describe('mensajeErrorIngreso (HU41)', () => {
+  it('solo un 400 dice que las credenciales son incorrectas', () => {
+    expect(mensajeErrorIngreso({ status: 400 })).toBe(
+      MENSAJES_ACCESO.credenciales,
+    )
+  })
+
+  it('sin conexión o con el servidor caído no culpa a la contraseña', () => {
+    for (const status of [0, 500, 503, undefined]) {
+      expect(mensajeErrorIngreso({ status })).toBe(MENSAJES_ACCESO.sinConexion)
+    }
+  })
+
+  it('avisa cuando hubo demasiados intentos', () => {
+    expect(mensajeErrorIngreso({ status: 429 })).toBe(
+      MENSAJES_ACCESO.demasiadosIntentos,
+    )
   })
 })
 
@@ -160,5 +190,14 @@ describe('menú por rol (HU45)', () => {
     expect(puedeVerSeccion('Alumno', 'inscripciones')).toBe(true)
     expect(puedeVerSeccion('Alumno', 'cuotas')).toBe(false)
     expect(puedeVerSeccion('Alumno', 'pagos')).toBe(false)
+  })
+
+  it('un rol o una sección inesperados no habilitan nada', () => {
+    // Valores que podrían llegar en tiempo de ejecución sin pasar por el tipo
+    for (const rol of ['Admin', 'constructor', '__proto__', '']) {
+      expect(seccionesSegunRol(rol as RolApp)).toEqual([])
+      expect(puedeVerSeccion(rol as RolApp, 'inicio')).toBe(false)
+    }
+    expect(puedeVerSeccion('Padre', 'facturas' as Seccion)).toBe(false)
   })
 })

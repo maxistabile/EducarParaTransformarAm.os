@@ -1,7 +1,8 @@
 // Pantallas de espera, error y redirección mientras se valida la sesión.
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { irALaWeb } from '../navegacion'
+import { MENSAJES_ACCESO } from '../reglasAuthApp'
 import { useSesionApp } from './contextoSesion'
 
 function Centrado({ children }: { children: ReactNode }) {
@@ -25,11 +26,30 @@ export function PantallaCarga() {
 /** La validación falló (por ejemplo, sin conexión): no se muestra nada privado. */
 export function PantallaErrorSesion({ mensaje }: { mensaje: string }) {
   const { revalidar, salir } = useSesionApp()
+  const [errorCierre, setErrorCierre] = useState('')
+
+  const cerrarSesion = () => {
+    setErrorCierre('')
+    salir().then(
+      (resultado) => {
+        if (!resultado.ok) setErrorCierre(resultado.mensaje)
+      },
+      () => {
+        setErrorCierre(MENSAJES_ACCESO.errorCierre)
+      },
+    )
+  }
+
   return (
     <Centrado>
       <p role='alert' className='font-bold text-red'>
         {mensaje}
       </p>
+      {errorCierre && (
+        <p role='alert' className='mt-3 text-sm font-bold text-red'>
+          {errorCierre}
+        </p>
+      )}
       <div className='mt-5 flex flex-col gap-2'>
         <button
           type='button'
@@ -40,11 +60,7 @@ export function PantallaErrorSesion({ mensaje }: { mensaje: string }) {
         </button>
         <button
           type='button'
-          onClick={() => {
-            salir().catch(() => {
-              // Sigue en esta pantalla: no se muestra nada privado
-            })
-          }}
+          onClick={cerrarSesion}
           className='py-2 text-sm font-semibold text-textMuted underline'
         >
           Cerrar sesión

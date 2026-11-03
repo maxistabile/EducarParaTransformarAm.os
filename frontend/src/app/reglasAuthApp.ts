@@ -28,10 +28,31 @@ export const MENSAJES_ACCESO = {
   errorValidacion:
     'No pudimos verificar tu sesión. Revisá tu conexión e intentá de nuevo.',
   sesionVencida: 'Tu sesión venció. Ingresá de nuevo.',
+  sinConexion:
+    'No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.',
+  demasiadosIntentos:
+    'Hiciste demasiados intentos. Esperá unos minutos y volvé a probar.',
+  errorCierre:
+    'No se pudo cerrar la sesión. Revisá tu conexión e intentá de nuevo.',
 }
 
 /** El servidor rechazó la sesión guardada (token vencido o revocado). */
 export class ErrorSesionInvalida extends Error {}
+
+/** Resultado de una operación de sesión: los errores se devuelven, no se lanzan. */
+export type Resultado = { ok: true } | { ok: false; mensaje: string }
+
+/**
+ * Mensaje para un error de Supabase Auth al iniciar sesión.
+ * Solo un 400 (credenciales inválidas) es culpa del usuario; sin conexión
+ * (status 0 o sin status) o con el servidor caído no se debe decir que la
+ * contraseña está mal.
+ */
+export function mensajeErrorIngreso(error: { status?: number }): string {
+  if (error.status === 400) return MENSAJES_ACCESO.credenciales
+  if (error.status === 429) return MENSAJES_ACCESO.demasiadosIntentos
+  return MENSAJES_ACCESO.sinConexion
+}
 
 export type Destino =
   | { tipo: 'app'; rol: RolApp }
@@ -68,7 +89,7 @@ export interface DependenciasSesion {
    * servidor rechaza la sesión, y cualquier otro error si falla la consulta.
    */
   cargarPerfil: (idUsuario: string) => Promise<PerfilUsuario | null>
-  cerrarSesion: () => Promise<void>
+  cerrarSesion: () => Promise<Resultado>
 }
 
 /**
@@ -104,32 +125,39 @@ export async function resolverSesion(
   )
 }
 
+/**
+ * Cierra la sesión rechazada. Si el cierre falla, igual se devuelve
+ * 'sin-sesion' (no se habilita nada) y la sesión que haya quedado guardada
+ * se vuelve a rechazar en la próxima validación.
+ */
 async function rechazar(
   deps: DependenciasSesion,
   aviso: string,
 ): Promise<EstadoSesion> {
-  try {
-    await deps.cerrarSesion()
-  } catch {
-    // Aunque falle el cierre remoto, no se habilitan las pantallas privadas
+  const cierre = await deps.cerrarSesion()
+  return {
+    estado: 'sin-sesion',
+    aviso: cierre.ok ? aviso : `${aviso} ${MENSAJES_ACCESO.errorCierre}`,
   }
-  return { estado: 'sin-sesion', aviso }
 }
 
 // ── Menú por rol (HU45) ───────────────────────────────────────
 export type Seccion = 'inicio' | 'cuotas' | 'pagos' | 'inscripciones' | 'perfil'
 
-const SECCIONES_POR_ROL: Record<RolApp, Seccion[]> = {
+// Map en lugar de objeto: un rol que no está en la lista (por ejemplo,
+// 'constructor' o un valor inesperado de la base) no encuentra nada.
+const SECCIONES_POR_ROL: ReadonlyMap<string, readonly Seccion[]> = new Map([
   // El padre ve cuotas, pagos e inscripciones de sus hijos
-  Padre: ['inicio', 'cuotas', 'pagos', 'inscripciones', 'perfil'],
+  ['Padre', ['inicio', 'cuotas', 'pagos', 'inscripciones', 'perfil']],
   // El alumno ve solo sus inscripciones (no ve pagos)
-  Alumno: ['inicio', 'inscripciones', 'perfil'],
-}
+  ['Alumno', ['inicio', 'inscripciones', 'perfil']],
+])
 
-export function seccionesSegunRol(rol: RolApp): Seccion[] {
-  return SECCIONES_POR_ROL[rol]
+/** Secciones del rol; un rol desconocido no tiene ninguna. */
+export function seccionesSegunRol(rol: RolApp): readonly Seccion[] {
+  return SECCIONES_POR_ROL.get(rol) ?? []
 }
 
 export function puedeVerSeccion(rol: RolApp, seccion: Seccion): boolean {
-  return SECCIONES_POR_ROL[rol].includes(seccion)
+  return seccionesSegunRol(rol).includes(seccion)
 }

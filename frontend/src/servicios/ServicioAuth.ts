@@ -4,13 +4,24 @@
 // Único punto por el que las pantallas de la app usan Supabase Auth y la
 // tabla `usuarios`. Las pantallas no consultan tablas directamente.
 // Usa la instancia única del cliente (Singleton, src/lib/supabase.ts).
+//
+// Manejo de errores: lo que usan las pantallas (iniciarSesion,
+// cerrarSesion, validarSesion) nunca lanza; devuelve un Resultado o un
+// EstadoSesion con el mensaje para mostrar. obtenerIdSesion y cargarPerfil
+// sí lanzan, porque solo los usa resolverSesion, que convierte cada error
+// en un estado (ver reglasAuthApp.ts).
 import { supabase } from '../lib/supabase'
 import {
   ErrorSesionInvalida,
   MENSAJES_ACCESO,
+  mensajeErrorIngreso,
   resolverSesion,
 } from '../app/reglasAuthApp'
-import type { EstadoSesion, PerfilUsuario } from '../app/reglasAuthApp'
+import type {
+  EstadoSesion,
+  PerfilUsuario,
+  Resultado,
+} from '../app/reglasAuthApp'
 
 async function obtenerIdSesion(): Promise<string | null> {
   const { data, error } = await supabase.auth.getSession()
@@ -31,9 +42,14 @@ async function cargarPerfil(idUsuario: string): Promise<PerfilUsuario | null> {
 }
 
 /** Cierra la sesión solo en este dispositivo (HU42). */
-async function cerrarSesion(): Promise<void> {
-  const { error } = await supabase.auth.signOut({ scope: 'local' })
-  if (error) throw error
+async function cerrarSesion(): Promise<Resultado> {
+  try {
+    const { error } = await supabase.auth.signOut({ scope: 'local' })
+    if (error) return { ok: false, mensaje: MENSAJES_ACCESO.errorCierre }
+    return { ok: true }
+  } catch {
+    return { ok: false, mensaje: MENSAJES_ACCESO.errorCierre }
+  }
 }
 
 export const ServicioAuth = {
@@ -41,17 +57,19 @@ export const ServicioAuth = {
    * HU41. Solo valida las credenciales: el perfil, el rol y el estado
    * activo los valida `validarSesion`, que corre al cambiar la sesión.
    */
-  async iniciarSesion(
-    email: string,
-    password: string,
-  ): Promise<{ ok: true } | { ok: false; mensaje: string }> {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    })
-    if (error || !data.user)
-      return { ok: false, mensaje: MENSAJES_ACCESO.credenciales }
-    return { ok: true }
+  async iniciarSesion(email: string, password: string): Promise<Resultado> {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+      if (error) return { ok: false, mensaje: mensajeErrorIngreso(error) }
+      if (!data.user) return { ok: false, mensaje: MENSAJES_ACCESO.sinConexion }
+      return { ok: true }
+    } catch {
+      // Falla de red antes de recibir respuesta
+      return { ok: false, mensaje: MENSAJES_ACCESO.sinConexion }
+    }
   },
 
   /** Valida la sesión guardada: perfil, rol y estado activo. */
