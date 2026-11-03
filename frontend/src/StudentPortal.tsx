@@ -16,21 +16,13 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from './lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
 import type { User } from '@supabase/supabase-js'
 import type { FormEvent } from 'react'
 import { textoHorario, mensajeErrorServicios } from './reglasServicios'
 import { materiasConProfesor } from './reportes'
 import type { AsignacionR, HorarioR } from './reportes'
-
-// ═══════════════════════════════════════════════════════════════
-//  SUPABASE CLIENT
-// ═══════════════════════════════════════════════════════════════
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL as string,
-  import.meta.env.VITE_SUPABASE_ANON_KEY as string,
-)
 
 // ═══════════════════════════════════════════════════════════════
 //  TIPOS — coinciden con el schema de la base de datos
@@ -367,9 +359,6 @@ export default function StudentPortal() {
 
   // Un padre/tutor ve los datos de su hijo/a; un estudiante, los propios.
   const esTutor = !!rol && /padre|tutor/i.test(rol)
-
-  console.log(import.meta.env.VITE_SUPABASE_URL)
-  console.log(import.meta.env.VITE_SUPABASE_ANON_KEY)
 
   // ── Auth ────────────────────────────────────────────────────
   useEffect(() => {
