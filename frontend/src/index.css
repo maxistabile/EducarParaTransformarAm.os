@@ -30,6 +30,9 @@
   --color-blue: #2980B9;
   --color-pink: #E91E8C;
 
+  /* Fondo de la app móvil (PWA, identidad visual del plan) */
+  --color-appFondo: #F7F6FC;
+
   /* Tipografía */
   --font-sans: 'Nunito', 'Segoe UI', sans-serif;
 
