@@ -11,8 +11,18 @@ import Proximamente from './pantallas/Proximamente'
 
 // Etiquetas del <head> que solo existen mientras se está en la app, para
 // que el navegador no ofrezca instalarla desde la web (ver vite.config.ts).
+// crossorigin="use-credentials": el navegador pide el manifiesto sin
+// cookies; con este atributo las envía, y así carga también en los
+// previews de Vercel protegidos con Vercel Authentication.
 const CABECERA_APP: Array<{ tag: 'link' | 'meta'; attrs: Record<string, string> }> = [
-  { tag: 'link', attrs: { rel: 'manifest', href: '/manifest.webmanifest' } },
+  {
+    tag: 'link',
+    attrs: {
+      rel: 'manifest',
+      href: '/manifest.webmanifest',
+      crossorigin: 'use-credentials',
+    },
+  },
   { tag: 'meta', attrs: { name: 'theme-color', content: '#5B35C5' } },
   { tag: 'meta', attrs: { name: 'apple-mobile-web-app-capable', content: 'yes' } },
   { tag: 'meta', attrs: { name: 'apple-mobile-web-app-title', content: 'Educar App' } },
