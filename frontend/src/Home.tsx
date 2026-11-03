@@ -5,13 +5,8 @@
  */
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from './lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL as string,
-  import.meta.env.VITE_SUPABASE_ANON_KEY as string,
-)
 
 // ═══════════════════════════════════════════════════════════════
 //  TIPOS

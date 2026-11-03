@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from './lib/supabase'
 import type { User } from '@supabase/supabase-js'
 import {
   DIAS_DEPORTE,
@@ -45,11 +45,6 @@ import {
   mensajeErrorAlumno,
 } from './validacionesAlumno'
 import type { FormAlumno } from './validacionesAlumno'
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL as string,
-  import.meta.env.VITE_SUPABASE_ANON_KEY as string,
-)
 
 // ═══════════════════════════════════════════════════════════════
 //  TIPOS
