@@ -9,7 +9,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 
 ---
 
-## 1. Estado del proyecto (al 03/11/2026)
+## 1. Estado del proyecto (al 05/11/2026)
 
 | Parte del TPI | Estado |
 |---|---|
@@ -17,7 +17,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 | Parte 2 – Sistema de gestión web (RF1 a RF9, HU1 a HU40) | ✅ Terminado, desplegado y evaluado (27/10) |
 | TP Unidad 4 – CI/CD y optimización | ✅ Entregado |
 | TP Unidad 5 – Pruebas y calidad | ✅ Entregado |
-| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa)** |
+| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18) y HU41, HU42 y parte de HU45 (PR #19). HU45 no queda completa: ver sección 3.1. |
 
 ### Fechas que no se mueven
 - **09/11/2026 – Cierre de desarrollo:** integración, pruebas integrales y despliegue final de la PWA (según el plan).
@@ -27,7 +27,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 - Recuperatorios: 24/11 y 01/12.
 
 ### Atraso respecto del plan
-El plan ubica las HU41 a HU57 en los sprints M1 a M4 (ya vencidos) y las HU58 a HU66 en M5 (02/11 – 06/11). Al 03/11 la PWA **todavía no se empezó en el repo**, así que quedan **26 HU (63 puntos) para hacer en pocos días**. Por eso: PR chicos, reutilizar todo lo que ya existe y seguir el **orden de implementación de la sección 7.4**, que prioriza lo que se ve en el testing.
+El plan ubica las HU41 a HU57 en los sprints M1 a M4 (ya vencidos) y las HU58 a HU66 en M5 (02/11 – 06/11). Al 05/11 falta el grueso de las historias: HU43 y HU44, y de HU46 a HU66. Por eso: PR chicos, reutilizar todo lo que ya existe y seguir el **orden de implementación de la sección 7.4**, que prioriza lo que se ve en el testing.
 
 ---
 
@@ -81,7 +81,18 @@ El plan ubica las HU41 a HU57 en los sprints M1 a M4 (ya vencidos) y las HU58 a 
 | `Alumno` | `/portal` | |
 
 - Hoy el control por rol se hace **en el frontend** (Login.tsx, AdminPanel.tsx, StudentPortal.tsx).
-- ⚠️ **La PWA va a hablar directo con Supabase**, así que el control por rol **tiene que reforzarse en la base con Row Level Security (RLS)** al menos en las tablas que usa (cuotas, facturas, comprobantes, alumnos, notificaciones). Por ejemplo: un padre solo lee filas de sus hijos. Esto es prioridad antes de exponer datos de pagos.
+- La PWA habla directo con Supabase y también controla el rol en el frontend (`frontend/src/app/reglasAuthApp.ts`, `RutasProtegidas.tsx`).
+
+### 3.1. Limitación aceptada: RLS fuera del alcance (decisión del equipo, 05/11/2026)
+La aplicación se presenta como una **demo académica con datos ficticios y sin usuarios reales**. El equipo decidió no implementar Row Level Security para simplificar el proyecto. Esta decisión reemplaza las indicaciones anteriores que pedían implementarlo.
+
+- HU45 conserva implementados el menú, las rutas y los comportamientos existentes, pero **no queda completamente cumplida** respecto del aislamiento de datos en la base.
+- **RNF7 no puede darse por completamente cumplido** sin esa protección.
+- Los filtros y controles del frontend **no garantizan el aislamiento de datos ante consultas directas a la API**.
+- La demo debe usar **datos ficticios y comprobantes inventados**.
+- Se mantienen la autenticación, las validaciones de archivos, la protección de secretos y el Storage privado cuando corresponda.
+
+Reglas para el desarrollo: no habilitar, deshabilitar ni modificar RLS o políticas existentes; no agregar RLS en las tablas nuevas; no reemplazarlo por otro sistema de autorización en el backend; conservar las validaciones, los filtros por usuario, los menús y las rutas por rol que ya existen.
 
 ---
 
@@ -148,14 +159,14 @@ Fuente principal: **[`docs/plan-app-movil.md`](docs/plan-app-movil.md)**, el ext
 ### 7.2. Patrones de diseño (del plan; aplicarlos de verdad, se evalúan)
 | Patrón | Cómo se aplica en el código |
 |---|---|
-| **Singleton** | Un único cliente de Supabase (por ejemplo `frontend/src/lib/supabase.ts`) que usan la web y la PWA. **Es lo primero que se hace**: hoy cada pantalla llama a `createClient`. |
-| **Facade** | Servicios por módulo: **`ServicioCuotas`**, **`ServicioPagos`**, **`ServicioFacturas`** (por ejemplo en `frontend/src/servicios/`). Ejemplo: `registrarPago()` sube el archivo a Storage, crea el comprobante y lo asocia a la factura y a los ítems. **Las pantallas nunca consultan tablas directo.** |
+| **Singleton** | Un único cliente de Supabase (`frontend/src/lib/supabase.ts`) que usan la web y la PWA. Ninguna pantalla llama a `createClient`. |
+| **Facade** | Servicios por módulo en `frontend/src/servicios/`: **`ServicioAuth`** (ya existe), **`ServicioCuotas`**, **`ServicioPagos`**, **`ServicioFacturas`**. Ejemplo: `registrarPago()` sube el archivo a Storage, crea el comprobante y lo asocia a la factura y a los ítems. **Las pantallas nunca consultan tablas directo.** |
 | **Observer** | El estado del comprobante es el sujeto. Al aprobar/rechazar, se enteran la pantalla de cuotas del padre (**Realtime**, sin recargar), el panel de validación y el proceso de correos. Ya existe un Observer con triggers en la etapa 15: seguir esa línea. |
 
 ### 7.3. Requerimientos e historias (HU41 a HU66)
 | Épica | HU | Canal | Resp. | Contenido |
 |---|---|---|---|---|
-| RF10 Autenticación en la app | HU41–HU45 | App | Agostina | Login, logout (sin volver con "Atrás"), recuperar contraseña por correo (Supabase Auth), cambiar contraseña (mín. 8 caracteres), menú y rutas por rol + **RLS de facturas y pagos**. |
+| RF10 Autenticación en la app | HU41–HU45 | App | Agostina | Login, logout (sin volver con "Atrás"), recuperar contraseña por correo (Supabase Auth), cambiar contraseña (mín. 8 caracteres), menú y rutas por rol. El aislamiento de datos en la base queda fuera de alcance (sección 3.1). |
 | RF11 Valores y facturación | HU46–HU50 | Web + automático | Maximiliano | Valor de cuota (con **fecha de vigencia**, no afecta facturas ya emitidas), valor de cada deporte, de cada recorrido y del comedor (> 0, solo Admin). **HU50:** factura mensual automática por alumno. |
 | RF12 Cuotas y pagos | HU51–HU56 | App + web | Agos (51–54) / Maxi (55–56) | Cuotas pendientes (vencidas destacadas), pagadas, historial de pagos; elegir ítems y **subir comprobante**; **aprobar/rechazar con motivo** en la web; **emitir comprobante de pago en PDF**. |
 | RF13 Consultas por alumno | HU57–HU59 | App | Agostina | Facturas + comprobantes por período (desde ≤ hasta), historial de deuda por ítem y mes, inscripciones (solo lectura; el alumno ve solo las suyas). |
@@ -168,16 +179,16 @@ Fuente principal: **[`docs/plan-app-movil.md`](docs/plan-app-movil.md)**, el ext
 - **Una factura admite varios comprobantes.** No se puede pagar un ítem ya pagado. Al subirlo queda **"En revisión"**.
 - Archivos **JPG, PNG o PDF de hasta 5 MB**, con errores claros (RNF8).
 - **Sin recargo por mora.**
-- Comprobantes y facturas: solo los ve **el padre del alumno y el administrador** (bucket privado + RLS, RNF7). **El alumno no ve pagos.**
+- Comprobantes y facturas: solo los ve **el padre del alumno y el administrador** (RNF7). Se usa bucket privado; sin RLS, esto no queda garantizado en la base (sección 3.1). **El alumno no ve pagos.**
 - Cada envío de correo se **registra con su resultado** y **no se repite** para el mismo padre y período (RNF9).
 
 **Tablas nuevas previstas** (etapa16 en adelante; revisar antes `cuotas`, `notificaciones` y `becas` para **reutilizar** lo que sirva): valores (con vigencia), facturas, ítems de factura, comprobantes de pago, registro de envíos.
 
 ### 7.4. Orden de implementación sugerido (por el atraso)
 Cada paso es un PR (o pocos). Priorizar que el flujo **"consultar cuota → pagar → cargar comprobante → aprobar"** funcione de punta a punta para el testing.
-1. **Base:** Singleton del cliente de Supabase + `vite-plugin-pwa` + layout móvil y rutas `/app`.
-2. **HU41–HU45:** auth de la app y rutas por rol.
-3. **etapa16 (SQL):** tablas de valores, facturas, ítems, comprobantes y envíos + **RLS** + bucket privado + corrección de `'Efectivo'`.
+1. ✅ **Base:** Singleton del cliente de Supabase + `vite-plugin-pwa` + layout móvil y rutas `/app` (PR #15 y #18).
+2. **HU41–HU45:** ✅ HU41, HU42 y parte de HU45 (PR #19). Faltan HU43 y HU44. HU45 no queda completa (sección 3.1).
+3. **etapa16 en adelante (SQL), en scripts separados por bloque:** tablas de valores, facturas, ítems, comprobantes y envíos + bucket privado + corrección de `'Efectivo'`.
 4. **HU46–HU49:** formularios de valores en AdminPanel (en un componente nuevo, no agrandar `AdminPanel.tsx`).
 5. **HU50:** facturación. Hacer primero una **función SQL invocable a mano** (para generar datos de demo y probar), después la Edge Function + PDF + pg_cron.
 6. **HU51–HU53 y HU59:** consultas del padre/alumno en la app.
@@ -230,11 +241,12 @@ El plan define la bitácora como una **planilla compartida en Google Drive** que
 
 - 57 advertencias de ESLint (React Hooks, `any`, variables sin uso): corregir de a poco.
 - `AdminPanel.tsx` de más de 12.000 líneas: dividirlo en módulos cuando se toque.
-- Cada pantalla crea su propio cliente de Supabase (`createClient`); centralizarlo en una única instancia (patrón Singleton del plan de trabajo). **Es el paso 1 de la sección 7.4.**
-- Control de acceso solo en el frontend → **RLS** (ver sección 3).
+- Control de acceso solo en el frontend: limitación aceptada para esta demo (sección 3.1).
 - Edge Functions y migraciones se despliegan a mano.
 - Accesibilidad 56 y SEO 75 en PageSpeed; bundle de JS de 776 kB (lazy loading pendiente).
-- 12 vulnerabilidades informadas por `npm audit` en dependencias (no correr `audit fix` sin probar).
+- 25 vulnerabilidades informadas por `npm audit` al 05/11/2026 (4 bajas, 13 moderadas y 8 altas), pendientes de revisión en la Issue #21. No correr `audit fix` sin probar.
+- `supabase/functions/crear-usuario/index.ts` está casi entero comentado en el repo (55 de 65 líneas), así que no coincide con una función que esté funcionando. **No redesplegarla desde ese archivo:** `DEPLOY_MANUAL.md` indica copiarlo tal cual y eso podría romper el alta de usuarios. Antes hay que comparar el repo con lo desplegado.
+- El alta de alumnos usa el DNI como contraseña (`AdminPanel.tsx`), que puede tener 7 dígitos. Subir a 8 la longitud mínima global de Supabase Auth podría romper esas altas: revisarlo antes de cambiar ese ajuste.
 
 ---
 

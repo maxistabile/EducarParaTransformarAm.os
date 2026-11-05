@@ -3,6 +3,8 @@
 > Extracto de `Plan_de_Trabajo_Proyecto_Met2_Grupo13_Amos_Web_y_Movil.docx` (secciones 10, 12, 16 y 17), convertido a Markdown para que Claude Code lo pueda leer. Se omitieron los objetivos SMART, las horas por etapa, el Gantt, el PERT y las figuras.
 > **Fuente de verdad:** el documento original. Si se modifica el plan, actualizar también este archivo.
 > Grupo 13 – Am.os · Jara, Agostina · Stabile, Maximiliano · Metodología de Sistemas II – TUP 2026
+>
+> **Nota del 05/11/2026 (decisión del equipo).** La aplicación se presenta como una demo académica con datos ficticios y sin usuarios reales, y RLS queda fuera del alcance como limitación aceptada. El requerimiento original no se elimina ni se da por cumplido. Detalle en la sección 3.1 de `CLAUDE.md`. Falta reflejarlo en el documento original.
 
 *Esta parte se agrega al plan de la parte web (secciones 1 a 9). Se mantienen sin cambios, y rigen para la app: los requerimientos no funcionales RNF1 a RNF5, las columnas del tablero Kanban y la Definition of Done (con el agregado indicado en 10.5) y la organización semanal de los sprints.*
 
@@ -65,6 +67,8 @@ Se mantienen RNF1 a RNF5 de la parte web y se agregan los siguientes:
 | **RNF8** | Usabilidad | La carga de comprobantes admite archivos JPG, PNG o PDF de hasta 5 MB e informa con claridad los errores. |
 | **RNF9** | Confiabilidad | Cada envío automático de correo queda registrado con su resultado y no se repite para el mismo padre y período. |
 | **RNF10** | Organizativo | El uso de IA se registra en la bitácora de IA con el formato definido por la cátedra. |
+
+> **Nota del 05/11/2026 (decisión del equipo).** La aplicación se presenta como una demo académica con datos ficticios y sin usuarios reales, y RLS queda fuera del alcance como limitación aceptada. El requerimiento original no se elimina ni se da por cumplido. **RNF7 no puede darse por completamente cumplido** sin esa protección: los filtros y controles del frontend no garantizan el aislamiento de datos ante consultas directas a la API. Se mantiene el Storage privado cuando corresponda, y la demo debe usar comprobantes inventados.
 
 ### 10.3. Clasificación del tipo de sistema de información
 Se mantiene la clasificación de la parte web: un Sistema de Procesamiento de Transacciones (TPS) con características de Sistema de Información Gerencial (MIS). La aplicación móvil agrega nuevas transacciones (facturación mensual, carga y aprobación de comprobantes y emisión de comprobantes de pago) y nuevos listados de ingresos y pagos para la Dirección (RF15), que refuerzan el componente gerencial.
@@ -209,6 +213,8 @@ Se presenta un backlog por sprint, con una fila por cada historia de usuario, su
 | **HU47** | **Establecer el valor de cada deporte** Como administrador quiero establecer el valor mensual de cada deporte para cobrar cada actividad según su costo. | Alta | To Do | 1. Agregar el valor al deporte. 2. Habilitar su edición en la web. | • Cada deporte tiene su propio valor. • Solo el administrador puede modificarlo. |
 | **HU48** | **Establecer el valor de cada recorrido** Como administrador quiero establecer el valor mensual de cada recorrido para cobrar el transporte según el recorrido. | Alta | To Do | 1. Agregar el valor al recorrido. 2. Habilitar su edición en la web. | • Cada uno de los cuatro recorridos tiene su propio valor. • Solo el administrador puede modificarlo. |
 | **HU49** | **Establecer el valor del comedor** Como administrador quiero establecer el valor mensual del comedor para incluirlo en la factura de los alumnos inscriptos. | Alta | To Do | 1. Registrar el valor del servicio. 2. Habilitar su edición en la web. | • El valor debe ser mayor que cero. • Solo el administrador puede modificarlo. |
+
+> **Nota del 05/11/2026 (decisión del equipo).** La aplicación se presenta como una demo académica con datos ficticios y sin usuarios reales, y RLS queda fuera del alcance como limitación aceptada. El requerimiento original no se elimina ni se da por cumplido. **HU45** conserva implementados el menú, las rutas y los comportamientos existentes (PR #19), pero **no queda completamente cumplida** respecto del aislamiento de datos en la base: su tarea 3 no se realiza, y el criterio "Un padre no accede a datos de alumnos que no son sus hijos" no queda garantizado ante consultas directas a la API. Los criterios sobre qué ve cada rol dependen de HU51 a HU59.
 
 #### Sprint M2 (13/10 – 16/10) · Facturación mensual y consulta de cuotas · 4 historias · 11 puntos
 | **ID** | **Historia de usuario** | **Prior.** | **Estado** | **Tareas** | **Criterios de aceptación** |
