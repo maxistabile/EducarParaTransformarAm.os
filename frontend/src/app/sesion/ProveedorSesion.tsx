@@ -43,6 +43,9 @@ export default function ProveedorSesion({ children }: { children: ReactNode }) {
             validar(false)
             return
           }
+          // 'salio' y 'recuperacion' quitan de la interfaz al usuario anterior.
+          // Solo cambia este estado: no se llama a signOut, porque durante la
+          // recuperación la sesión hace falta para guardar la contraseña.
           turno.current++
           setSesion((prev) =>
             prev.estado === 'sin-sesion' ? prev : { estado: 'sin-sesion', aviso: null },
