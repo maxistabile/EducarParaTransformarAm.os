@@ -66,9 +66,14 @@ let reautenticando = false
 // cuenta y solo en esta pestaña) permite retomarlo o cerrarlo.
 const MARCA_RECUPERACION = 'recuperacion-en-curso'
 
+/** null si no existe, como en Node. Acceder puede lanzar: usar dentro de try. */
+function almacenSesion(): Storage | null {
+  return typeof sessionStorage === 'undefined' ? null : sessionStorage
+}
+
 function leerMarca(): string | null {
   try {
-    return globalThis.sessionStorage?.getItem(MARCA_RECUPERACION) ?? null
+    return almacenSesion()?.getItem(MARCA_RECUPERACION) ?? null
   } catch (causa) {
     registrar('leerMarca', causa)
     return null
@@ -77,7 +82,7 @@ function leerMarca(): string | null {
 
 function guardarMarca(idUsuario: string) {
   try {
-    globalThis.sessionStorage?.setItem(MARCA_RECUPERACION, idUsuario)
+    almacenSesion()?.setItem(MARCA_RECUPERACION, idUsuario)
   } catch (causa) {
     registrar('guardarMarca', causa)
   }
@@ -85,7 +90,7 @@ function guardarMarca(idUsuario: string) {
 
 function borrarMarca() {
   try {
-    globalThis.sessionStorage?.removeItem(MARCA_RECUPERACION)
+    almacenSesion()?.removeItem(MARCA_RECUPERACION)
   } catch (causa) {
     registrar('borrarMarca', causa)
   }
@@ -142,7 +147,7 @@ function registrar(operacion: string, causa: unknown) {
 
 /** navigator.onLine === false asegura que no se puede enviar nada. */
 function sinConexion(): boolean {
-  return globalThis.navigator?.onLine === false
+  return typeof navigator !== 'undefined' && navigator.onLine === false
 }
 
 function noCambiada(mensaje: string, pedirEnlace = false): ResultadoContrasena {

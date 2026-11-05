@@ -492,6 +492,58 @@ describe('recarga después de verificar (HU43)', () => {
   })
 })
 
+describe('APIs del navegador ausentes o bloqueadas', () => {
+  it('sin sessionStorage el proceso funciona y no registra errores', async () => {
+    vi.stubGlobal('sessionStorage', undefined)
+
+    const proceso = await procesoVerificado()
+    expect(ServicioAuth.hayRecuperacionPendiente()).toBe(false)
+    expect(
+      await ServicioAuth.guardarContrasenaRecuperada(proceso, CLAVE_NUEVA),
+    ).toEqual({ estado: 'cambiada' })
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it('si sessionStorage está bloqueado, conserva el manejo del error', async () => {
+    vi.stubGlobal('sessionStorage', {
+      getItem: () => {
+        throw new DOMException('bloqueado', 'SecurityError')
+      },
+      setItem: () => {
+        throw new DOMException('bloqueado', 'SecurityError')
+      },
+      removeItem: () => {
+        throw new DOMException('bloqueado', 'SecurityError')
+      },
+    })
+
+    const proceso = await procesoVerificado()
+    expect(ServicioAuth.hayRecuperacionPendiente()).toBe(false)
+    expect(console.error).toHaveBeenCalledWith(
+      '[ServicioAuth] guardarMarca:',
+      expect.objectContaining({ nombre: 'SecurityError' }),
+    )
+    expect(
+      await ServicioAuth.guardarContrasenaRecuperada(proceso, CLAVE_NUEVA),
+    ).toEqual({ estado: 'cambiada' })
+  })
+
+  it('sin navigator no da por perdida la conexión', async () => {
+    vi.stubGlobal('navigator', undefined)
+    expect((await ServicioAuth.verificarEnlace(TOKEN_ENLACE)).estado).toBe(
+      'verificado',
+    )
+    expect(auth.verifyOtp).toHaveBeenCalledOnce()
+  })
+
+  it('con navigator.onLine en true envía normalmente', async () => {
+    vi.stubGlobal('navigator', { onLine: true })
+    expect((await ServicioAuth.verificarEnlace(TOKEN_ENLACE)).estado).toBe(
+      'verificado',
+    )
+  })
+})
+
 describe('escucharCambios: eventos de la recuperación', () => {
   it('PASSWORD_RECOVERY olvida al usuario anterior sin llamar a signOut', async () => {
     const alCambiar = vi.fn()
