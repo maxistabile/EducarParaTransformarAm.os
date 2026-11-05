@@ -1,9 +1,10 @@
-// Perfil: datos de la cuenta y cierre de sesión (HU42).
-// Cambiar la contraseña es HU44 (próximo PR).
+// Perfil: datos de la cuenta, cambio de contraseña (HU44) y cierre de
+// sesión (HU42).
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MENSAJES_ACCESO } from '../reglasAuthApp'
 import { useSesionApp } from '../sesion/contextoSesion'
+import FormCambiarContrasena from './FormCambiarContrasena'
 
 export default function Perfil() {
   const { sesion, salir } = useSesionApp()
@@ -52,9 +53,7 @@ export default function Perfil() {
         </div>
       </dl>
 
-      <p className='mt-5 text-sm text-textMuted'>
-        Cambiar la contraseña: próximamente.
-      </p>
+      <FormCambiarContrasena />
 
       {error && (
         <p role='alert' className='mt-4 text-sm font-bold text-red'>

@@ -1,7 +1,7 @@
 // HU41 · Iniciar sesión en la app con las cuentas existentes de la web.
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import { ServicioAuth } from '../../servicios/ServicioAuth'
 import { irALaWeb } from '../navegacion'
 import { MENSAJES_ACCESO } from '../reglasAuthApp'
@@ -18,6 +18,8 @@ const INPUT =
 
 export default function Ingresar() {
   const { sesion } = useSesionApp()
+  // Mensaje de NuevaContrasena al terminar la recuperación (HU43)
+  const exito = (useLocation().state as { exito?: string } | null)?.exito
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -105,6 +107,11 @@ export default function Ingresar() {
               {mensaje}
             </p>
           )}
+          {!mensaje && exito && (
+            <p role='status' className='text-sm font-bold text-green'>
+              {exito}
+            </p>
+          )}
 
           <button
             type='submit'
@@ -113,6 +120,12 @@ export default function Ingresar() {
           >
             {enviando ? 'Ingresando...' : 'Ingresar'}
           </button>
+          <Link
+            to='/app/recuperar'
+            className='text-center text-sm font-semibold text-purple-700 underline'
+          >
+            ¿Olvidaste tu contraseña?
+          </Link>
         </form>
 
         <p className='mt-6 text-center'>

@@ -9,8 +9,10 @@ import AppLayout from './AppLayout'
 import AvisoActualizacion from './AvisoActualizacion'
 import Ingresar from './pantallas/Ingresar'
 import Inicio from './pantallas/Inicio'
+import NuevaContrasena from './pantallas/NuevaContrasena'
 import Perfil from './pantallas/Perfil'
 import Proximamente from './pantallas/Proximamente'
+import Recuperar from './pantallas/Recuperar'
 import ProveedorSesion from './sesion/ProveedorSesion'
 import { RutaProtegida, RutaSeccion } from './sesion/RutasProtegidas'
 
@@ -64,6 +66,8 @@ export default function AppRoutes() {
     <ProveedorSesion>
       <Routes>
         <Route path='ingresar' element={<Ingresar />} />
+        <Route path='recuperar' element={<Recuperar />} />
+        <Route path='nueva-contrasena' element={<NuevaContrasena />} />
         <Route element={<RutaProtegida />}>
           <Route element={<AppLayout />}>
             <Route index element={<Inicio />} />
