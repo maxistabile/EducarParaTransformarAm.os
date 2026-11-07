@@ -45,6 +45,9 @@ import {
   mensajeErrorAlumno,
 } from './validacionesAlumno'
 import type { FormAlumno } from './validacionesAlumno'
+// Parte 3 · HU46 a HU49 — valores (componente aparte, solo rol Admin)
+import GestionValores from './gestion/GestionValores'
+import { puedeGestionarValores } from './reglasValores'
 
 // ═══════════════════════════════════════════════════════════════
 //  TIPOS
@@ -332,6 +335,7 @@ const NAV_ADMIN = [
   { key: 'asignaciones', icon: '🔗', label: 'Asignaciones' },
   { key: 'horarios', icon: '🕐', label: 'Horarios' },
   { key: 'cuotas', icon: '💳', label: 'Cuotas' },
+  { key: 'valores', icon: '💲', label: 'Valores' },
   { key: 'pagos', icon: '💰', label: 'Registrar pagos' },
   { key: 'becas', icon: '🎟️', label: 'Becas' },
   { key: 'sueldos', icon: '💼', label: 'Sueldos' },
@@ -458,7 +462,11 @@ export default function AdminPanel() {
   }
 
   const esAdmin = ['Admin', 'Directivo'].includes(perfil.rol)
-  const navItems = esAdmin ? NAV_ADMIN : NAV_DOCENTE
+  const navItems = esAdmin
+    ? NAV_ADMIN.filter(
+        (i) => i.key !== 'valores' || puedeGestionarValores(perfil.rol),
+      )
+    : NAV_DOCENTE
   const initials = `${perfil.nombre[0]}${perfil.apellido[0]}`
 
   return (
@@ -626,6 +634,9 @@ export default function AdminPanel() {
           {activeNav === 'asignaciones' && esAdmin && <GestionAsignaciones />}
           {activeNav === 'horarios' && esAdmin && <GestionHorarios />}
           {activeNav === 'cuotas' && esAdmin && <GestionCuotas />}
+          {activeNav === 'valores' && puedeGestionarValores(perfil.rol) && (
+            <GestionValores />
+          )}
           {activeNav === 'pagos' && esAdmin && <RegistrarPagos />}
           {activeNav === 'becas' && esAdmin && <GestionBecas />}
           {activeNav === 'sueldos' && esAdmin && <GestionSueldos />}
