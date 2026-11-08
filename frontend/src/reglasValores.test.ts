@@ -37,7 +37,7 @@ describe('validarValor (HU46 a HU49)', () => {
   })
 
   it('rechaza cero, negativos, texto y más de 2 decimales', () => {
-    for (const monto of ['0', '0,00', '-100', 'abc', '', '10,555']) {
+    for (const monto of ['0', '0,00', '-100', 'abc', '', '10,555', '1.2.3', '5.', ',5']) {
       expect(validarValor({ monto, vigenteDesde: hoy }).ok).toBe(false)
     }
   })

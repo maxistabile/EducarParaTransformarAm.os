@@ -39,7 +39,15 @@ export function validarValor(datos: {
   vigenteDesde: string
 }): { ok: true; monto: number } | { ok: false; mensaje: string } {
   const texto = datos.monto.trim().replace(',', '.')
-  if (!/^\d+(\.\d{1,2})?$/.test(texto))
+  // Parte entera y hasta 2 decimales, sin una expresión con cuantificadores
+  // anidados: se separa por el punto y cada parte se valida por su cuenta.
+  const [entero, decimales, ...sobrante] = texto.split('.')
+  const soloDigitos = (parte: string) => /^\d+$/.test(parte)
+  const formatoValido =
+    sobrante.length === 0 &&
+    soloDigitos(entero) &&
+    (decimales === undefined || (soloDigitos(decimales) && decimales.length <= 2))
+  if (!formatoValido)
     return {
       ok: false,
       mensaje: 'Ingresá un importe válido, con hasta 2 decimales (ej.: 15000 o 15000,50).',

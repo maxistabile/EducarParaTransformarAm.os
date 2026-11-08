@@ -10,7 +10,7 @@ interface Llamada {
 const { estado } = vi.hoisted(() => ({
   estado: {
     llamadas: [] as Llamada[],
-    respuestas: [] as Array<{ tabla: string; respuesta: unknown; rechazo?: unknown }>,
+    respuestas: [] as Array<{ tabla: string; respuesta: unknown; rechazo?: Error }>,
   },
 }))
 
@@ -21,18 +21,27 @@ vi.mock('../lib/supabase', () => ({
       estado.llamadas.push(llamada)
       const i = estado.respuestas.findIndex((r) => r.tabla === tabla)
       const programada = i >= 0 ? estado.respuestas.splice(i, 1)[0] : undefined
-      const consulta: Record<string, unknown> = {}
-      for (const metodo of ['select', 'eq', 'is', 'order', 'maybeSingle', 'insert', 'update']) {
-        consulta[metodo] = (...args: unknown[]) => {
+      // Cada método registra la llamada y devuelve la misma consulta
+      const registrar =
+        (metodo: string) =>
+        (...args: unknown[]) => {
           llamada.metodos.push([metodo, args])
           return consulta
         }
+      const consulta = {
+        select: registrar('select'),
+        eq: registrar('eq'),
+        is: registrar('is'),
+        order: registrar('order'),
+        maybeSingle: registrar('maybeSingle'),
+        insert: registrar('insert'),
+        update: registrar('update'),
+        then: (ok: (v: unknown) => unknown, mal: (e: unknown) => unknown) =>
+          (programada?.rechazo
+            ? Promise.reject(programada.rechazo)
+            : Promise.resolve(programada?.respuesta ?? { data: null, error: null })
+          ).then(ok, mal),
       }
-      consulta.then = (ok: (v: unknown) => unknown, mal: (e: unknown) => unknown) =>
-        (programada?.rechazo
-          ? Promise.reject(programada.rechazo)
-          : Promise.resolve(programada?.respuesta ?? { data: null, error: null })
-        ).then(ok, mal)
       return consulta
     },
   },
@@ -44,9 +53,17 @@ const responder = (tabla: string, respuesta: unknown) => {
   estado.respuestas.push({ tabla, respuesta })
 }
 
-const metodos = (n: number) => estado.llamadas[n].metodos.map(([m]) => m)
+/** Llamada número n a supabase.from(); falla la prueba si no existe. */
+const llamada = (n: number): Llamada => {
+  const encontrada = estado.llamadas.at(n)
+  if (!encontrada) throw new Error(`No hubo una llamada número ${n}`)
+  return encontrada
+}
+const metodos = (n: number) => llamada(n).metodos.map(([m]) => m)
 const argumentos = (n: number, metodo: string) =>
-  estado.llamadas[n].metodos.filter(([m]) => m === metodo).map(([, a]) => a)
+  llamada(n)
+    .metodos.filter(([m]) => m === metodo)
+    .map(([, a]) => a)
 
 beforeEach(() => {
   estado.llamadas = []
