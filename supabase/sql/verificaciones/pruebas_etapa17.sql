@@ -14,7 +14,9 @@
 --
 -- Usa periodos de 2099 y sus propios valores al 01/01/2099:
 -- Cuota $10.000, Comedor $5.000 y $1.000 por cada deporte y recorrido
--- en uso. Necesita 4 alumnos activos.
+-- en uso. Necesita 4 alumnos activos. Con la base del 08/11 se
+-- esperan 12 controles (P12 usa la cuota impaga con Efectivo que
+-- mostro el relevamiento).
 -- Los errores esperados se capturan solo si son el codigo previsto;
 -- cualquier otro error corta la prueba y se muestra.
 -- ============================================================
@@ -40,6 +42,8 @@ declare
   v_cuota      record;
   v_item       record;
   v_otros      numeric;
+  v_legado     bigint;
+  v_p12        text := 'ejecutado';
   v_anio_pasado int := extract(year from now() at time zone 'America/Argentina/Buenos_Aires')::int - 1;
 begin
   -- ---------- Ayudas (temporales: se deshacen al final) ----------
@@ -399,8 +403,28 @@ begin
     'FAC_PERIODO_PASADO', 'P11 periodo pasado');
   v_controles := v_controles + 1;
 
+  -- ---------- P12: cuota anterior impaga con metodo Efectivo ----------
+  -- En la base real (relevamiento del 08/11) hay una cuota impaga con
+  -- metodo 'Efectivo' cargado antes de etapa17. Tiene que poder vencer y
+  -- pagarse por transferencia: el trigger solo rechaza un metodo NUEVO.
+  select id_cuota into v_legado from cuotas
+   where metodo_pago = 'Efectivo' and estado in ('Pendiente', 'Vencida', 'En mora')
+   order by id_cuota limit 1;
+  if v_legado is null then
+    v_p12 := 'omitido: no hay cuotas impagas con Efectivo';
+  else
+    update cuotas set estado = 'Vencida' where id_cuota = v_legado;
+    update cuotas set estado = 'Pagada', fecha_pago = '2099-01-20', metodo_pago = 'Transferencia'
+     where id_cuota = v_legado;
+    perform pg_temp.verificar(
+        (select estado = 'Pagada' and metodo_pago = 'Transferencia'
+           from cuotas where id_cuota = v_legado), 'P12',
+      'la cuota anterior con Efectivo no pudo vencer o pagarse por transferencia');
+    v_controles := v_controles + 1;
+  end if;
+
   -- ---------- Fin: error A PROPOSITO para deshacer todo ----------
-  raise exception 'PRUEBAS_ETAPA17_OK|% controles (P1 a P11). Alumnos activos: %. Total de enero 2099 del alumno con cuota previa: %. La base vuelve atras: no quedo ningun dato de prueba.',
-    v_controles, v_activos, (select total from facturas where id_factura = f1);
+  raise exception 'PRUEBAS_ETAPA17_OK|% controles (P1 a P12; P12 %). Alumnos activos: %. Total de enero 2099 del alumno con cuota previa: %. La base vuelve atras: no quedo ningun dato de prueba.',
+    v_controles, v_p12, v_activos, (select total from facturas where id_factura = f1);
 end
 $prueba$;

@@ -25,6 +25,8 @@
 --   4 Triggers: NINGUNO. Cualquier trigger -> AVISAR.
 --   5 RLS: INACTIVO, sin politicas (CLAUDE.md 3.1).
 --   6 Claves foraneas que apuntan a cuotas: NINGUNA.
+--     (Relevado el 08/11: existe pagos.pagos_id_cuota_fkey, ON DELETE
+--     RESTRICT, que el codigo no usa. Ver relevamiento_pagos.sql.)
 --   7 Datos: duplicados por alumno y periodo = 0; recargo > 0 = 0.
 --     Las cuotas con neto <= 0 son informativas (beca del 100 %
 --     generada con el sistema anterior): se conservan.

@@ -29,12 +29,20 @@ La tabla `cuotas` no se crea en ningún script del repo, así que **antes** de
    "LO ESPERADO" del encabezado del archivo. Si algo no coincide (por ejemplo,
    un trigger en `cuotas`, otra columna obligatoria o falta la clave única
    `(id_alumno, mes, anio)`), avisar antes de seguir.
-2. **`etapa17_facturacion.sql`**. Empieza con un control previo que corta el
+   *Resultado del 08/11:* compatible con `etapa17`. Diferencias sin impacto:
+   `estado` es `varchar` y acepta nulos, `id_alumno` acepta nulos,
+   `fecha_vencimiento` es obligatoria, hay una columna `created_at` y la FK a
+   alumnos es `ON DELETE CASCADE`. Diferencia a revisar: existe una tabla
+   `pagos` con FK a `cuotas` (`ON DELETE RESTRICT`) que el código no usa.
+2. **`verificaciones/relevamiento_pagos.sql`** (solo lectura). Muestra si
+   `pagos` tiene datos y si alguna función, vista o tarea programada escribe en
+   `cuotas` por fuera de la aplicación. Comparar con "LO ESPERADO".
+3. **`etapa17_facturacion.sql`**. Empieza con un control previo que corta el
    script sin aplicar nada si `cuotas` no es como se espera. Al final muestra
    una tabla: todo tiene que dar `OK`.
-3. **`verificaciones/pruebas_etapa17.sql`**. Termina **siempre con un error a
+4. **`verificaciones/pruebas_etapa17.sql`**. Termina **siempre con un error a
    propósito** para que la base vuelva atrás y no quede ningún dato. Si todo
-   pasa, el error es `PRUEBAS_ETAPA17_OK|11 controles ...`. Cualquier otro
+   pasa, el error es `PRUEBAS_ETAPA17_OK|12 controles ...`. Cualquier otro
    error es una falla: copiarlo completo.
 
 Cómo conviven factura y cuota:
