@@ -9,7 +9,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 
 ---
 
-## 1. Estado del proyecto (al 05/11/2026)
+## 1. Estado del proyecto (al 08/11/2026)
 
 | Parte del TPI | Estado |
 |---|---|
@@ -17,7 +17,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 | Parte 2 – Sistema de gestión web (RF1 a RF9, HU1 a HU40) | ✅ Terminado, desplegado y evaluado (27/10) |
 | TP Unidad 4 – CI/CD y optimización | ✅ Entregado |
 | TP Unidad 5 – Pruebas y calidad | ✅ Entregado |
-| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18) y HU41, HU42 y parte de HU45 (PR #19). HU45 no queda completa: ver sección 3.1. |
+| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18), HU41, HU42 y parte de HU45 (PR #19), HU43 y HU44 (PR #24) y HU46 a HU49 (PR #27). HU45 no queda completa: ver sección 3.1. **HU50 en curso, parcial** (etapa A en `feat/HU50-facturacion`; la etapa B, pendiente). |
 
 ### Fechas que no se mueven
 - **09/11/2026 – Cierre de desarrollo:** integración, pruebas integrales y despliegue final de la PWA (según el plan).
@@ -27,7 +27,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 - Recuperatorios: 24/11 y 01/12.
 
 ### Atraso respecto del plan
-El plan ubica las HU41 a HU57 en los sprints M1 a M4 (ya vencidos) y las HU58 a HU66 en M5 (02/11 – 06/11). Al 05/11 falta el grueso de las historias: HU43 y HU44, y de HU46 a HU66. Por eso: PR chicos, reutilizar todo lo que ya existe y seguir el **orden de implementación de la sección 7.4**, que prioriza lo que se ve en el testing.
+El plan ubica las HU41 a HU57 en los sprints M1 a M4 (ya vencidos) y las HU58 a HU66 en M5 (02/11 – 06/11). Al 08/11 falta el grueso de las historias: HU50 completa (etapa B) y de HU51 a HU66. Por eso: PR chicos, reutilizar todo lo que ya existe y seguir el **orden de implementación de la sección 7.4**, que prioriza lo que se ve en el testing.
 
 ---
 
@@ -119,13 +119,13 @@ Reglas para Claude Code:
 
 ## 5. Base de datos y backend
 
-- **Migraciones:** scripts `supabase/sql/etapaN_*.sql`, que **el equipo ejecuta a mano** en Supabase → SQL Editor, en orden. La próxima es **`etapa16_…`**.
+- **Migraciones:** scripts `supabase/sql/etapaN_*.sql`, que **el equipo ejecuta a mano** en Supabase → SQL Editor, en orden. La próxima es **`etapa18_…`**. Antes de `etapa17` se corre `verificaciones/relevamiento_cuotas.sql` (la tabla `cuotas` no se crea en el repo).
   - Cada script debe ser **idempotente** (`if not exists`, `create or replace`) e incluir al final una **consulta de verificación**.
   - Documentar cada script nuevo en `supabase/sql/README.md`.
   - **Claude Code no ejecuta SQL contra la base de producción**: escribe el script y el equipo lo corre.
 - **Reglas de negocio en la base** (constraints y triggers): legajo automático, DNI único, cupo de curso, máximo 2 deportes sin cruces de horario, 4 recorridos, sin duplicados, notificaciones al padre (etapa 15, patrón Observer).
 - **Tablas existentes relevantes para la Parte 3:** `cuotas` (con `id_alumno`, `anio`, `mes`, `estado`, `fecha_pago`, `metodo_pago`), `notificaciones`, `alumnos`, `usuarios`, inscripciones a deportes, transporte y comedor (etapa 14), `becas`. Revisar los scripts antes de crear tablas nuevas: **reutilizar antes que agregar**.
-  - ⚠️ `cuotas.metodo_pago` acepta `'Efectivo'`, pero la Parte 3 dice que **no se aceptan pagos en efectivo** (solo transferencia). Corregirlo en una etapa nueva.
+  - `cuotas.metodo_pago` acepta `'Efectivo'` en el check de etapa6, pero desde `etapa17` un trigger rechaza un método **nuevo** distinto de `Transferencia`; los pagos anteriores en efectivo se conservan.
 - **Edge Functions:** `crear-usuario` y `enviar-notificacion` (Resend). Se despliegan a mano (`DEPLOY_MANUAL.md`, `deploy-edge-functions.sh`).
   - Secrets en Supabase: `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `EMAIL_FROM`, `EMAILS_HABILITADOS`, `EMAIL_ALLOWLIST`.
   - La **service role key** solo vive en los secrets de Supabase; nunca en el frontend ni en el repo.
@@ -175,7 +175,7 @@ Fuente principal: **[`docs/plan-app-movil.md`](docs/plan-app-movil.md)**, el ext
 
 **Reglas de negocio (plan 10.5 y consigna):**
 - **Una factura por alumno y por mes**, se genera el **último día hábil** del mes **para el mes siguiente** y **vence el día 10**. Ítems: cuota + cada deporte activo + transporte (solo si está inscripto ese mes) + comedor.
-- **Solo transferencia** (sin efectivo ni pasarela). ⚠️ `cuotas.metodo_pago` acepta `'Efectivo'`: corregirlo.
+- **Solo transferencia** (sin efectivo ni pasarela). Desde `etapa17` la base rechaza un pago nuevo que no sea transferencia.
 - **Una factura admite varios comprobantes.** No se puede pagar un ítem ya pagado. Al subirlo queda **"En revisión"**.
 - Archivos **JPG, PNG o PDF de hasta 5 MB**, con errores claros (RNF8).
 - **Sin recargo por mora.**
@@ -187,10 +187,10 @@ Fuente principal: **[`docs/plan-app-movil.md`](docs/plan-app-movil.md)**, el ext
 ### 7.4. Orden de implementación sugerido (por el atraso)
 Cada paso es un PR (o pocos). Priorizar que el flujo **"consultar cuota → pagar → cargar comprobante → aprobar"** funcione de punta a punta para el testing.
 1. ✅ **Base:** Singleton del cliente de Supabase + `vite-plugin-pwa` + layout móvil y rutas `/app` (PR #15 y #18).
-2. **HU41–HU45:** ✅ HU41, HU42 y parte de HU45 (PR #19). Faltan HU43 y HU44. HU45 no queda completa (sección 3.1).
-3. **etapa16 en adelante (SQL), en scripts separados por bloque:** tablas de valores, facturas, ítems, comprobantes y envíos + bucket privado + corrección de `'Efectivo'`.
-4. **HU46–HU49:** formularios de valores en AdminPanel (en un componente nuevo, no agrandar `AdminPanel.tsx`).
-5. **HU50:** facturación. Hacer primero una **función SQL invocable a mano** (para generar datos de demo y probar), después la Edge Function + PDF + pg_cron.
+2. **HU41–HU45:** ✅ HU41, HU42 y parte de HU45 (PR #19); ✅ HU43 y HU44 (PR #24). HU45 no queda completa (sección 3.1).
+3. **etapa16 en adelante (SQL), en scripts separados por bloque:** ✅ valores (`etapa16`); facturas, ítems y corrección de `'Efectivo'` (`etapa17`, HU50 etapa A); faltan comprobantes, envíos y bucket privado.
+4. ✅ **HU46–HU49:** valores en `gestion/GestionValores.tsx`, para Admin y Directivo (PR #27).
+5. **HU50:** facturación, **parcial**. Etapa A: `fn_generar_facturas` (invocable a mano o desde la sección Facturación), único generador de cuotas y facturas; la cuota del período es el ítem Cuota de su factura; el saldo se lee de `v_facturas_saldo` y `v_factura_items_saldo` (contrato para HU51 a HU56). Etapa B, pendiente: último día hábil con feriados, pg_cron y PDF bajo demanda reutilizable por HU60.
 6. **HU51–HU53 y HU59:** consultas del padre/alumno en la app.
 7. **HU54 → HU55 → HU56:** carga de comprobante, aprobación en la web (con Realtime) y comprobante PDF.
 8. **HU57 y HU58:** facturas por período y deuda por ítem.
