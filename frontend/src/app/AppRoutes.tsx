@@ -8,6 +8,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from './AppLayout'
 import AvisoActualizacion from './AvisoActualizacion'
 import Ingresar from './pantallas/Ingresar'
+import Inscripciones from './pantallas/Inscripciones'
 import Inicio from './pantallas/Inicio'
 import NuevaContrasena from './pantallas/NuevaContrasena'
 import Perfil from './pantallas/Perfil'
@@ -60,8 +61,10 @@ export default function AppRoutes() {
   // El service worker y el manifiesto usan el scope /app/ (con barra)
   if (pathname === '/app') return <Navigate to='/app/' replace />
 
-  // Cuotas, pagos e inscripciones siguen como "Próximamente": no se
-  // consultan esos datos hasta tener sus permisos (RLS) y sus historias.
+  // Inscripciones (HU59) ya consulta datos. Cuotas y pagos siguen como
+  // "Próximamente" hasta sus historias (HU51 a HU53). Sin RLS, por
+  // decisión del equipo (CLAUDE.md 3.1): los filtros por usuario están en
+  // los servicios.
   return (
     <ProveedorSesion>
       <Routes>
@@ -91,7 +94,7 @@ export default function AppRoutes() {
               path='inscripciones'
               element={
                 <RutaSeccion seccion='inscripciones'>
-                  <Proximamente titulo='Inscripciones' />
+                  <Inscripciones />
                 </RutaSeccion>
               }
             />

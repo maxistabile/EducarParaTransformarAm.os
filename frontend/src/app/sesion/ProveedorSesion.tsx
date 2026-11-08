@@ -8,6 +8,7 @@ import { ServicioAuth } from '../../servicios/ServicioAuth'
 import { MENSAJES_ACCESO } from '../reglasAuthApp'
 import type { EstadoSesion, Resultado } from '../reglasAuthApp'
 import { ContextoSesion } from './contextoSesion'
+import { borrarSelecciones } from './seleccionAlumno'
 
 export default function ProveedorSesion({ children }: { children: ReactNode }) {
   const [sesion, setSesion] = useState<EstadoSesion>({ estado: 'cargando' })
@@ -46,7 +47,9 @@ export default function ProveedorSesion({ children }: { children: ReactNode }) {
           // 'salio' y 'recuperacion' quitan de la interfaz al usuario anterior.
           // Solo cambia este estado: no se llama a signOut, porque durante la
           // recuperación la sesión hace falta para guardar la contraseña.
+          // También se olvida el alumno elegido de la cuenta anterior.
           turno.current++
+          borrarSelecciones()
           setSesion((prev) =>
             prev.estado === 'sin-sesion' ? prev : { estado: 'sin-sesion', aviso: null },
           )
@@ -60,8 +63,10 @@ export default function ProveedorSesion({ children }: { children: ReactNode }) {
   const salir = useCallback(async (): Promise<Resultado> => {
     turno.current++
     const resultado = await ServicioAuth.cerrarSesion()
-    if (resultado.ok) setSesion({ estado: 'sin-sesion', aviso: null })
-    else validar(false)
+    if (resultado.ok) {
+      borrarSelecciones()
+      setSesion({ estado: 'sin-sesion', aviso: null })
+    } else validar(false)
     return resultado
   }, [validar])
 
