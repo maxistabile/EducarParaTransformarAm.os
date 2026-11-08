@@ -128,8 +128,10 @@ export function mensajeErrorFacturacion(error: {
   const [codigo, ...datos] = mensaje.split('|')
   switch (codigo) {
     case 'FAC_SIN_VALOR': {
-      const [fecha, lista] = datos
-      return `Falta el valor vigente al ${fecha ?? '?'} de: ${lista ?? '?'}. Cargalo en Valores con esa fecha o una anterior. No se emitió ninguna factura.`
+      // .at() devuelve undefined si falta la parte: el respaldo '?' aplica
+      const fecha = datos.at(0) ?? '?'
+      const lista = datos.at(1) ?? '?'
+      return `Falta el valor vigente al ${fecha} de: ${lista}. Cargalo en Valores con esa fecha o una anterior. No se emitió ninguna factura.`
     }
     case 'FAC_PERIODO_PASADO':
       return 'No se emiten facturas de meses anteriores al actual.'

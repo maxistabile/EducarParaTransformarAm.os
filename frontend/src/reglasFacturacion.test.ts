@@ -98,6 +98,13 @@ describe('mensajeErrorFacturacion', () => {
     )
   })
 
+  it('FAC_SIN_VALOR incompleto usa "?" en lo que falta', () => {
+    expect(conMensaje('FAC_SIN_VALOR')).toBe(
+      'Falta el valor vigente al ? de: ?. Cargalo en Valores con esa fecha o una anterior. No se emitió ninguna factura.',
+    )
+    expect(conMensaje('FAC_SIN_VALOR|01/12/2026')).toMatch(/al 01\/12\/2026 de: \?\./)
+  })
+
   it('traduce cada código de la base', () => {
     expect(conMensaje('FAC_PERIODO_PASADO|10/2026')).toMatch(/meses anteriores/)
     expect(conMensaje('FAC_PERIODO|2026|13')).toBe('Elegí un mes y un año válidos.')
