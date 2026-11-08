@@ -51,6 +51,11 @@ La tabla `cuotas` no se crea en ningún script del repo, así que **antes** de
    pasa, el error es `PRUEBAS_ETAPA17_OK|12 controles ...`. Cualquier otro
    error es una falla: copiarlo completo.
 
+*Ejecución del 08/11 (informada por el equipo):* `etapa17` con todos los
+controles en `OK` y 0 facturas emitidas. La prueba transaccional dio
+`PRUEBAS_ETAPA17_OK|12 controles (P1 a P12; P12 ejecutado)` con 20 alumnos
+activos, sin dejar datos.
+
 Cómo conviven factura y cuota:
 - La cuota es la deuda del concepto "Cuota". La factura la agrupa con los
   servicios y su ítem Cuota **apunta** a la fila de `cuotas`: una sola deuda
