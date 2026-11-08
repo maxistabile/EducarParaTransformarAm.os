@@ -48,6 +48,10 @@ import type { FormAlumno } from './validacionesAlumno'
 // Parte 3 · HU46 a HU49 — valores (componente aparte, Admin y Directivo)
 import GestionValores from './gestion/GestionValores'
 import { puedeGestionarValores } from './reglasValores'
+// Parte 3 · HU50 (etapa A) — facturación mensual (componente aparte)
+import GestionFacturacion from './gestion/GestionFacturacion'
+import { colorEstadoCobro, mensajeErrorFacturacion } from './reglasFacturacion'
+import { esCuotaACobrar, etiquetaEstadoCuota, netoCuota } from './reglasCuotas'
 
 // ═══════════════════════════════════════════════════════════════
 //  TIPOS
@@ -162,11 +166,13 @@ interface Cuota {
   mes: number
   anio: number
   monto_base: number
+  recargo?: number | null
   descuento: number
   estado: string
   fecha_vencimiento: string
   fecha_pago: string | null
   metodo_pago: string | null
+  cubierta_por_beca?: boolean | null
   alumnos: { nombre: string; apellido: string } | null
 }
 
@@ -336,6 +342,7 @@ const NAV_ADMIN = [
   { key: 'horarios', icon: '🕐', label: 'Horarios' },
   { key: 'cuotas', icon: '💳', label: 'Cuotas' },
   { key: 'valores', icon: '💲', label: 'Valores' },
+  { key: 'facturacion', icon: '🧾', label: 'Facturación' },
   { key: 'pagos', icon: '💰', label: 'Registrar pagos' },
   { key: 'becas', icon: '🎟️', label: 'Becas' },
   { key: 'sueldos', icon: '💼', label: 'Sueldos' },
@@ -646,6 +653,7 @@ export default function AdminPanel() {
           {activeNav === 'valores' && puedeGestionarValores(perfil.rol) && (
             <GestionValores />
           )}
+          {activeNav === 'facturacion' && esAdmin && <GestionFacturacion />}
           {activeNav === 'pagos' && esAdmin && <RegistrarPagos />}
           {activeNav === 'becas' && esAdmin && <GestionBecas />}
           {activeNav === 'sueldos' && esAdmin && <GestionSueldos />}
@@ -860,16 +868,17 @@ function Dashboard({
         .from('inscripciones')
         .select('id_inscripcion', { count: 'exact' })
         .eq('estado', 'Pendiente'),
+      // Impagas con importe: una cuota heredada con neto 0 no es deuda
       supabase
         .from('cuotas')
-        .select('id_cuota', { count: 'exact' })
+        .select('monto_base, recargo, descuento, estado')
         .in('estado', ['Pendiente', 'Vencida', 'En mora']),
     ]).then(([a, d, i, c]) => {
       setStats({
         alumnos: a.count ?? 0,
         docentes: d.count ?? 0,
         inscripciones: i.count ?? 0,
-        cuotasPendientes: c.count ?? 0,
+        cuotasPendientes: (c.data ?? []).filter(esCuotaACobrar).length,
       })
     })
   }, [esAdmin])
@@ -5108,15 +5117,14 @@ async function notificarFamilias(
   }
 }
 
+// HU50 (etapa A): las cuotas ya no se generan acá. Las crea la
+// Facturación (fn_generar_facturas), que respeta las que ya existen y no
+// vuelve a pendiente una cuota pagada. Esta sección lista las cuotas y
+// procesa los vencimientos.
 function GestionCuotas() {
   const [cuotas, setCuotas] = useState<Cuota[]>([])
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
-  const [form, setForm] = useState({
-    mes: String(new Date().getMonth() + 1),
-    anio: String(new Date().getFullYear()),
-    monto_base: '',
-  })
 
   const load = useCallback(async () => {
     const { data } = await supabase
@@ -5131,76 +5139,21 @@ function GestionCuotas() {
     load()
   }, [load])
 
-  const generarCuotas = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setMsg('')
-    // Traer todos los alumnos activos
-    const { data: alumnos } = await supabase
-      .from('alumnos')
-      .select('id_alumno')
-      .eq('activo', true)
-    if (!alumnos || alumnos.length === 0) {
-      setMsg('No hay alumnos activos.')
-      setLoading(false)
-      return
-    }
-
-    const mes = Number(form.mes)
-    const anio = Number(form.anio)
-    const vencimiento = new Date(anio, mes - 1, 10) // vence el 10 de cada mes
-    const montoBase = Number(form.monto_base)
-
-    // Becas activas → mapa id_alumno → porcentaje de descuento
-    const { data: becas } = await supabase
-      .from('becas')
-      .select('id_alumno, porcentaje')
-      .eq('activo', true)
-    const becaPorAlumno: Record<number, number> = {}
-    ;(becas ?? []).forEach((b: { id_alumno: number; porcentaje: number }) => {
-      becaPorAlumno[b.id_alumno] = Number(b.porcentaje)
-    })
-
-    const cuotasNuevas = alumnos.map((a) => {
-      const pct = becaPorAlumno[a.id_alumno] ?? 0
-      return {
-        id_alumno: a.id_alumno,
-        mes,
-        anio,
-        monto_base: montoBase,
-        recargo: 0,
-        descuento: Math.round((montoBase * pct) / 100),
-        fecha_vencimiento: vencimiento.toISOString().split('T')[0],
-        estado: 'Pendiente',
-      }
-    })
-
-    // upsert para no duplicar si ya existen
-    const { error } = await supabase
-      .from('cuotas')
-      .upsert(cuotasNuevas, { onConflict: 'id_alumno,mes,anio' })
-    if (error) setMsg('Error: ' + error.message)
-    else {
-      setMsg(
-        `✅ ${alumnos.length} cuotas generadas para ${MESES[mes - 1]} ${anio}.`,
-      )
-      load()
-    }
-    setLoading(false)
-  }
-
   // R6 · Marca como vencidas las cuotas impagas pasadas de fecha
   //       y notifica automáticamente a las familias.
   const procesarVencimientos = async () => {
     setLoading(true)
     setMsg('')
     const hoy = new Date().toISOString().slice(0, 10)
-    const { data: vencidas } = await supabase
+    const { data } = await supabase
       .from('cuotas')
-      .select('id_cuota, id_alumno, mes, anio')
+      .select('id_cuota, id_alumno, mes, anio, monto_base, recargo, descuento, estado')
       .eq('estado', 'Pendiente')
       .lt('fecha_vencimiento', hoy)
-    if (!vencidas || vencidas.length === 0) {
+    // Una cuota heredada con neto 0 se conserva como está: no vence ni
+    // genera aviso de deuda.
+    const vencidas = (data ?? []).filter(esCuotaACobrar)
+    if (vencidas.length === 0) {
       setMsg('No hay cuotas pendientes que hayan vencido.')
       setLoading(false)
       return
@@ -5227,85 +5180,24 @@ function GestionCuotas() {
     setLoading(false)
   }
 
-  const CUOTA_COLOR: Record<string, string> = {
-    Pendiente: '#E67E22',
-    Pagada: '#27AE60',
-    Vencida: '#E74C3C',
-    'En mora': '#C0392B',
-  }
-
   return (
     <div>
       <h2 style={{ fontSize: 22, fontWeight: 900, margin: '0 0 20px' }}>
         💳 Cuotas
       </h2>
 
-      {/* Generador */}
+      {/* Generación: ahora la hace la Facturación (HU50) */}
       <div className='bg-white rounded-card p-6 shadow-card border border-border mb-6'>
-        <div className='text-[15px] font-extrabold text-text mb-5'>
-          Generar cuotas automáticamente para todos los alumnos
+        <div className='text-[15px] font-extrabold text-text mb-2'>
+          Generación y vencimientos
         </div>
-        <form
-          onSubmit={generarCuotas}
-          style={{
-            display: 'flex',
-            gap: 14,
-            alignItems: 'flex-end',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div>
-            <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
-              Mes
-            </span>
-            <select
-              className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border w-[160px] appearance-none'
-              value={form.mes}
-              onChange={(e) => setForm((p) => ({ ...p, mes: e.target.value }))}
-            >
-              {MESES.map((m, i) => (
-                <option key={i} value={i + 1}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
-              Año
-            </span>
-            <input
-              className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border w-[100px]'
-              value={form.anio}
-              onChange={(e) => setForm((p) => ({ ...p, anio: e.target.value }))}
-            />
-          </div>
-          <div>
-            <span className='text-[11px] font-extrabold text-textMuted block mb-[5px]'>
-              Monto base ($)
-            </span>
-            <input
-              type='number'
-              className='w-full px-[14px] py-[10px] rounded-input border-2 border-border text-[13px] text-text outline-none box-border w-[160px]'
-              required
-              value={form.monto_base}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, monto_base: e.target.value }))
-              }
-              placeholder='15000'
-            />
-          </div>
-          <button
-            type='submit'
-            disabled={loading}
-            className={
-              loading
-                ? 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer opacity-60'
-                : 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[10px] px-5 text-[13px] font-extrabold cursor-pointer'
-            }
-          >
-            {loading ? 'Generando...' : '⚡ Generar cuotas'}
-          </button>
+        <p className='text-[13px] text-textMuted mb-4'>
+          Las cuotas se generan junto con las facturas, desde la sección{' '}
+          <strong>Facturación</strong>: toma el valor vigente de Valores, aplica
+          la beca y respeta las cuotas que ya existen (no vuelve a pendiente una
+          cuota pagada).
+        </p>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           <button
             type='button'
             disabled={loading}
@@ -5315,7 +5207,7 @@ function GestionCuotas() {
           >
             ⏰ Procesar vencimientos
           </button>
-        </form>
+        </div>
         {msg && (
           <div
             style={{
@@ -5388,8 +5280,8 @@ function GestionCuotas() {
                     {c.fecha_vencimiento}
                   </td>
                   <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
-                    <span style={badge(CUOTA_COLOR[c.estado] ?? '#6B6B8A')}>
-                      {c.estado}
+                    <span style={badge(colorEstadoCobro(etiquetaEstadoCuota(c)))}>
+                      {etiquetaEstadoCuota(c)}
                     </span>
                   </td>
                 </tr>
@@ -5405,14 +5297,9 @@ function GestionCuotas() {
 // ═══════════════════════════════════════════════════════════════
 //  REGISTRO DE PAGOS
 // ═══════════════════════════════════════════════════════════════
-const METODOS_PAGO = [
-  'Efectivo',
-  'Transferencia',
-  'Tarjeta de débito',
-  'Tarjeta de crédito',
-  'Cheque',
-  'Otro',
-]
+// Parte 3: los pagos son solo por transferencia (la base rechaza otro
+// método nuevo; los pagos anteriores en efectivo se conservan).
+const METODOS_PAGO = ['Transferencia']
 
 const CUOTA_ESTADO_COLOR: Record<string, string> = {
   Pendiente: '#E67E22',
@@ -5431,7 +5318,7 @@ function RegistrarPagos() {
   const [selCuota, setSelCuota] = useState<number | null>(null)
   const [formPago, setFormPago] = useState({
     fecha_pago: new Date().toISOString().split('T')[0],
-    metodo_pago: 'Efectivo',
+    metodo_pago: 'Transferencia',
   })
 
   const load = useCallback(async () => {
@@ -5445,7 +5332,8 @@ function RegistrarPagos() {
     if (filtroMes) q = q.eq('mes', Number(filtroMes))
 
     const { data } = await q
-    if (data) setCuotas(data as unknown as Cuota[])
+    // Solo deuda real: una cuota heredada con neto 0 no se cobra
+    if (data) setCuotas((data as unknown as Cuota[]).filter(esCuotaACobrar))
   }, [filtroAnio, filtroMes])
 
   useEffect(() => {
@@ -5464,7 +5352,7 @@ function RegistrarPagos() {
       })
       .eq('id_cuota', c.id_cuota)
     if (error) {
-      setMsg('❌ Error al registrar: ' + error.message)
+      setMsg('❌ Error al registrar: ' + mensajeErrorFacturacion(error))
     } else {
       setMsg(
         `✅ Pago de ${c.alumnos?.apellido}, ${c.alumnos?.nombre} registrado correctamente.`,
@@ -5485,10 +5373,7 @@ function RegistrarPagos() {
     return true
   })
 
-  const totalPendiente = cuotasFiltradas.reduce(
-    (acc, c) => acc + c.monto_base - (c.descuento ?? 0),
-    0,
-  )
+  const totalPendiente = cuotasFiltradas.reduce((acc, c) => acc + netoCuota(c), 0)
 
   return (
     <div className='flex flex-col gap-6'>
@@ -5643,7 +5528,7 @@ function RegistrarPagos() {
             </thead>
             <tbody>
               {cuotasFiltradas.map((c) => {
-                const neto = c.monto_base - (c.descuento ?? 0)
+                const neto = netoCuota(c)
                 const isSelected = selCuota === c.id_cuota
                 const color = CUOTA_ESTADO_COLOR[c.estado] ?? '#6B6B8A'
                 return (
