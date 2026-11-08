@@ -25,9 +25,11 @@ export interface ValorServicio {
 /** Máximo de numeric(12,2): 10 dígitos enteros. */
 const MONTO_MAXIMO = 9_999_999_999.99
 
-/** Solo el rol Admin carga valores (HU47 a HU49). */
+/** Admin y Directivo comparten la gestión: ambos cargan valores (HU46 a HU49). */
+const ROLES_VALORES: readonly string[] = ['Admin', 'Directivo']
+
 export function puedeGestionarValores(rol: string | null | undefined): boolean {
-  return rol === 'Admin'
+  return rol != null && ROLES_VALORES.includes(rol)
 }
 
 /**

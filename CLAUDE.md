@@ -167,7 +167,7 @@ Fuente principal: **[`docs/plan-app-movil.md`](docs/plan-app-movil.md)**, el ext
 | Épica | HU | Canal | Resp. | Contenido |
 |---|---|---|---|---|
 | RF10 Autenticación en la app | HU41–HU45 | App | Agostina | Login, logout (sin volver con "Atrás"), recuperar contraseña por correo (Supabase Auth), cambiar contraseña (mín. 8 caracteres), menú y rutas por rol. El aislamiento de datos en la base queda fuera de alcance (sección 3.1). |
-| RF11 Valores y facturación | HU46–HU50 | Web + automático | Maximiliano | Valor de cuota (con **fecha de vigencia**, no afecta facturas ya emitidas), valor de cada deporte, de cada recorrido y del comedor (> 0, solo Admin). **HU50:** factura mensual automática por alumno. |
+| RF11 Valores y facturación | HU46–HU50 | Web + automático | Maximiliano | Valor de cuota (con **fecha de vigencia**, no afecta facturas ya emitidas), valor de cada deporte, de cada recorrido y del comedor (> 0; Admin y Directivo, que comparten la gestión). **HU50:** factura mensual automática por alumno. |
 | RF12 Cuotas y pagos | HU51–HU56 | App + web | Agos (51–54) / Maxi (55–56) | Cuotas pendientes (vencidas destacadas), pagadas, historial de pagos; elegir ítems y **subir comprobante**; **aprobar/rechazar con motivo** en la web; **emitir comprobante de pago en PDF**. |
 | RF13 Consultas por alumno | HU57–HU59 | App | Agostina | Facturas + comprobantes por período (desde ≤ hasta), historial de deuda por ítem y mes, inscripciones (solo lectura; el alumno ve solo las suyas). |
 | RF14 Correos automáticos | HU60–HU61 | Automático | Maximiliano | Último día hábil (con feriados): total, composición y **factura PDF adjunta**. Día 20: deuda por ítem solo a quien no completó el pago. |

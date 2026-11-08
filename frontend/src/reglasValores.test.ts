@@ -120,9 +120,10 @@ describe('valores diferenciados (HU47 y HU48)', () => {
 })
 
 describe('acceso y mensajes', () => {
-  it('solo el rol Admin gestiona valores', () => {
+  it('Admin y Directivo gestionan valores; los demás roles, no', () => {
     expect(puedeGestionarValores('Admin')).toBe(true)
-    for (const rol of ['Directivo', 'Docente', 'Padre', 'Alumno', null]) {
+    expect(puedeGestionarValores('Directivo')).toBe(true)
+    for (const rol of ['Docente', 'Padre', 'Alumno', '', null, undefined]) {
       expect(puedeGestionarValores(rol)).toBe(false)
     }
   })

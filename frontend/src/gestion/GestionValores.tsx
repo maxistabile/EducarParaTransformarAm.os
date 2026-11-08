@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 //  TP METODOLOGÍA II · Parte 3 · RF11.1 a RF11.4 (HU46 a HU49)
-//  Valores de cuota, deportes, transporte y comedor. Solo rol Admin.
+//  Valores de cuota, deportes, transporte y comedor. Admin y Directivo.
 //  Usa ServicioValores (Facade): esta pantalla no consulta tablas.
 // ═══════════════════════════════════════════════════════════════
 import { useCallback, useEffect, useState } from 'react'
