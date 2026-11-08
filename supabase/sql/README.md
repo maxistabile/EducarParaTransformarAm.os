@@ -37,6 +37,12 @@ La tabla `cuotas` no se crea en ningún script del repo, así que **antes** de
 2. **`verificaciones/relevamiento_pagos.sql`** (solo lectura). Muestra si
    `pagos` tiene datos y si alguna función, vista o tarea programada escribe en
    `cuotas` por fuera de la aplicación. Comparar con "LO ESPERADO".
+   *Resultado del 08/11:* coincide. `pagos` está vacía, sin triggers ni
+   actividad. Ninguna función, vista ni tarea programada escribe en `cuotas`
+   (pg_cron no está instalado). No hay cuotas sin alumno y `authenticated`
+   puede crear tablas temporales. **`etapa17` queda lista para ejecutar.**
+   `pagos` (con `monto_pagado`, `nro_comprobante` e `id_usuario_registra`)
+   queda para evaluar en HU53 a HU55 antes de crear tablas nuevas.
 3. **`etapa17_facturacion.sql`**. Empieza con un control previo que corta el
    script sin aplicar nada si `cuotas` no es como se espera. Al final muestra
    una tabla: todo tiene que dar `OK`.
