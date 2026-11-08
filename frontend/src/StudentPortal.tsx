@@ -22,6 +22,7 @@ import type { User } from '@supabase/supabase-js'
 import type { FormEvent } from 'react'
 import { textoHorario, mensajeErrorServicios } from './reglasServicios'
 import { materiasConProfesor } from './reportes'
+import { esCuotaACobrar } from './reglasCuotas'
 import type { AsignacionR, HorarioR } from './reportes'
 
 // ═══════════════════════════════════════════════════════════════
@@ -686,7 +687,9 @@ export default function StudentPortal() {
       .eq('id_alumno', idAlumno)
       .in('estado', ['Pendiente', 'Vencida', 'En mora'])
       .order('fecha_vencimiento', { ascending: true })
-    setCuotas((data as Cuota[]) ?? [])
+    // Solo deuda real: una cuota heredada con neto 0 (beca del 100 %) no
+    // se muestra como pendiente ni suma al contador (HU50)
+    setCuotas(((data as Cuota[] | null) ?? []).filter(esCuotaACobrar))
   }
 
   async function loadNotificaciones(userId: string) {
@@ -1390,7 +1393,7 @@ export default function StudentPortal() {
                 <>
                   <div className='bg-red/[0.06] border border-red/[0.19] rounded-[12px] px-4 py-3 mb-5 text-[13px] text-red font-bold'>
                     ⚠️ Tenés {cuotas.length} cuota{cuotas.length > 1 ? 's' : ''}{' '}
-                    sin abonar. Regularizá tu situación para evitar recargos.
+                    sin abonar. Te pedimos regularizar el pago (sin recargo por mora).
                   </div>
                   <table className='w-full border-collapse'>
                     <thead>
