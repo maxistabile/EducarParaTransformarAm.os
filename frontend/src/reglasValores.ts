@@ -41,12 +41,12 @@ export function validarValor(datos: {
   const texto = datos.monto.trim().replace(',', '.')
   // Parte entera y hasta 2 decimales, sin una expresión con cuantificadores
   // anidados: se separa por el punto y cada parte se valida por su cuenta.
-  const [entero, decimales, ...sobrante] = texto.split('.')
+  const partes = texto.split('.')
   const soloDigitos = (parte: string) => /^\d+$/.test(parte)
   const formatoValido =
-    sobrante.length === 0 &&
-    soloDigitos(entero) &&
-    (decimales === undefined || (soloDigitos(decimales) && decimales.length <= 2))
+    partes.length <= 2 &&
+    soloDigitos(partes[0]) &&
+    (partes.length === 1 || (soloDigitos(partes[1]) && partes[1].length <= 2))
   if (!formatoValido)
     return {
       ok: false,

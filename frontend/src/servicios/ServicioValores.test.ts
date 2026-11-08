@@ -21,6 +21,7 @@ vi.mock('../lib/supabase', () => ({
       estado.llamadas.push(llamada)
       const i = estado.respuestas.findIndex((r) => r.tabla === tabla)
       const programada = i >= 0 ? estado.respuestas.splice(i, 1)[0] : undefined
+      const rechazo = programada?.rechazo
       // Cada método registra la llamada y devuelve la misma consulta
       const registrar =
         (metodo: string) =>
@@ -37,8 +38,8 @@ vi.mock('../lib/supabase', () => ({
         insert: registrar('insert'),
         update: registrar('update'),
         then: (ok: (v: unknown) => unknown, mal: (e: unknown) => unknown) =>
-          (programada?.rechazo
-            ? Promise.reject(programada.rechazo)
+          (rechazo instanceof Error
+            ? Promise.reject(rechazo)
             : Promise.resolve(programada?.respuesta ?? { data: null, error: null })
           ).then(ok, mal),
       }
