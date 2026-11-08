@@ -45,6 +45,9 @@ import {
   mensajeErrorAlumno,
 } from './validacionesAlumno'
 import type { FormAlumno } from './validacionesAlumno'
+// Parte 3 · HU46 a HU49 — valores (componente aparte, Admin y Directivo)
+import GestionValores from './gestion/GestionValores'
+import { puedeGestionarValores } from './reglasValores'
 
 // ═══════════════════════════════════════════════════════════════
 //  TIPOS
@@ -332,6 +335,7 @@ const NAV_ADMIN = [
   { key: 'asignaciones', icon: '🔗', label: 'Asignaciones' },
   { key: 'horarios', icon: '🕐', label: 'Horarios' },
   { key: 'cuotas', icon: '💳', label: 'Cuotas' },
+  { key: 'valores', icon: '💲', label: 'Valores' },
   { key: 'pagos', icon: '💰', label: 'Registrar pagos' },
   { key: 'becas', icon: '🎟️', label: 'Becas' },
   { key: 'sueldos', icon: '💼', label: 'Sueldos' },
@@ -359,6 +363,15 @@ const NAV_DOCENTE = [
   { key: 'legajos', icon: '📁', label: 'Legajos' },
   { key: 'reservas', icon: '🏟️', label: 'Reservas' },
 ]
+
+// Secciones que ve cada rol. Las usan el menú lateral, los accesos rápidos
+// y la navegación, para que no se pueda llegar a una sección no permitida.
+function navSegunRol(rol: string) {
+  if (!['Admin', 'Directivo'].includes(rol)) return NAV_DOCENTE
+  return NAV_ADMIN.filter(
+    (i) => i.key !== 'valores' || puedeGestionarValores(rol),
+  )
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  COMPONENTE PRINCIPAL
@@ -458,7 +471,11 @@ export default function AdminPanel() {
   }
 
   const esAdmin = ['Admin', 'Directivo'].includes(perfil.rol)
-  const navItems = esAdmin ? NAV_ADMIN : NAV_DOCENTE
+  const navItems = navSegunRol(perfil.rol)
+  // Una sección que el rol no tiene lleva al inicio, no a un contenido vacío
+  const irA = (key: string) => {
+    setActiveNav(navItems.some((i) => i.key === key) ? key : 'dashboard')
+  }
   const initials = `${perfil.nombre[0]}${perfil.apellido[0]}`
 
   return (
@@ -594,7 +611,7 @@ export default function AdminPanel() {
                     : '3px solid transparent',
                 transition: 'all 0.15s',
               }}
-              onClick={() => setActiveNav(item.key)}
+              onClick={() => irA(item.key)}
             >
               <span>{item.icon}</span>
               <span>{item.label}</span>
@@ -608,7 +625,7 @@ export default function AdminPanel() {
             <Dashboard
               esAdmin={esAdmin}
               perfil={perfil}
-              onIr={setActiveNav}
+              onIr={irA}
             />
           )}
           {activeNav === 'usuarios' && esAdmin && (
@@ -626,6 +643,9 @@ export default function AdminPanel() {
           {activeNav === 'asignaciones' && esAdmin && <GestionAsignaciones />}
           {activeNav === 'horarios' && esAdmin && <GestionHorarios />}
           {activeNav === 'cuotas' && esAdmin && <GestionCuotas />}
+          {activeNav === 'valores' && puedeGestionarValores(perfil.rol) && (
+            <GestionValores />
+          )}
           {activeNav === 'pagos' && esAdmin && <RegistrarPagos />}
           {activeNav === 'becas' && esAdmin && <GestionBecas />}
           {activeNav === 'sueldos' && esAdmin && <GestionSueldos />}
@@ -938,7 +958,7 @@ function Dashboard({
           Accesos rápidos
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-          {(esAdmin ? NAV_ADMIN : NAV_DOCENTE)
+          {navSegunRol(perfil.rol)
             .filter((n) => n.key !== 'dashboard')
             .map((item) => (
               <div

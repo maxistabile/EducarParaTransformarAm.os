@@ -17,6 +17,7 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa13_correccion_duplicados.sql` | Corrección de la etapa 12 | Compara textos normalizados (espacios, tildes, ñ, mayúsculas); borra duplicados sin uso; unifica los grados con la lista oficial; muestra el resultado como tabla |
 | `etapa14_deportes_servicios.sql` | TP Met. II · RF4 y RF5 (HU21–HU29) | Grupos deportivos por nivel y horario con profesor responsable; máximo 2 deportes sin cruces; 4 recorridos de transporte; comedor; bajas que conservan historial |
 | `etapa15_notificaciones_inscripciones.sql` | TP Met. II · RF9 (HU40) | Aviso automático al padre al inscribir, cambiar o dar de baja a su hijo en deportes, transporte o comedor (patrón Observer con triggers) |
+| `etapa16_valores.sql` | TP Met. II · Parte 3 · RF11.1–RF11.4 (HU46–HU49) | Tabla `valores_servicio`: valores de cuota, cada deporte, cada recorrido y comedor, con fecha de vigencia. Un valor por concepto, referencia y fecha (corregir = reemplazar el de esa fecha). Sin RLS (decisión del equipo) |
 
 ## Pasos manuales adicionales
 
