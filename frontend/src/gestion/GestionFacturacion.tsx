@@ -11,6 +11,7 @@ import type { FacturaPeriodo } from '../servicios/ServicioFacturas'
 import {
   MESES,
   colorEstadoCobro,
+  etiquetaEstado,
   fechaCorta,
   fechaVencimiento,
   nombrePeriodo,
@@ -76,7 +77,7 @@ function DetalleItems({ factura }: { factura: FacturaPeriodo }) {
             </td>
             <td className={`${TD} font-bold`}>{pesos(i.neto)}</td>
             <td className={TD}>
-              <Estado texto={i.cubierta_por_beca ? 'Sin cargo' : i.estado_pago} />
+              <Estado texto={i.cubierta_por_beca ? 'Sin cargo' : etiquetaEstado(i.estado_pago)} />
               {i.cubierta_por_beca && (
                 <span className='block text-[11px] text-textMuted'>Cubierta por beca</span>
               )}

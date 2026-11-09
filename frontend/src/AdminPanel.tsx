@@ -50,6 +50,7 @@ import GestionValores from './gestion/GestionValores'
 import { puedeGestionarValores } from './reglasValores'
 // Parte 3 · HU50 (etapa A) — facturación mensual (componente aparte)
 import GestionFacturacion from './gestion/GestionFacturacion'
+import GestionComprobantes from './gestion/GestionComprobantes'
 import { colorEstadoCobro, mensajeErrorFacturacion } from './reglasFacturacion'
 import { esCuotaACobrar, etiquetaEstadoCuota, netoCuota } from './reglasCuotas'
 
@@ -343,6 +344,7 @@ const NAV_ADMIN = [
   { key: 'cuotas', icon: '💳', label: 'Cuotas' },
   { key: 'valores', icon: '💲', label: 'Valores' },
   { key: 'facturacion', icon: '🧾', label: 'Facturación' },
+  { key: 'comprobantes', icon: '📎', label: 'Comprobantes' },
   { key: 'pagos', icon: '💰', label: 'Registrar pagos' },
   { key: 'becas', icon: '🎟️', label: 'Becas' },
   { key: 'sueldos', icon: '💼', label: 'Sueldos' },
@@ -654,6 +656,7 @@ export default function AdminPanel() {
             <GestionValores />
           )}
           {activeNav === 'facturacion' && esAdmin && <GestionFacturacion />}
+          {activeNav === 'comprobantes' && esAdmin && <GestionComprobantes />}
           {activeNav === 'pagos' && esAdmin && <RegistrarPagos />}
           {activeNav === 'becas' && esAdmin && <GestionBecas />}
           {activeNav === 'sueldos' && esAdmin && <GestionSueldos />}

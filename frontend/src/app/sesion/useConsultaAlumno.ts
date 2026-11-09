@@ -22,6 +22,8 @@ export interface ConsultaAlumno<T> {
   /** Resultado vigente; null mientras carga. */
   actual: T | null
   reintentar: () => void
+  /** Vuelve a consultar sin borrar lo que se ve (cambios en vivo). */
+  recargar: () => void
 }
 
 /**
@@ -66,9 +68,13 @@ export function useConsultaAlumno<T>(consultar: Consulta<T>, siFalla: T): Consul
     setIntento((n) => n + 1)
   }, [])
 
+  const recargar = useCallback(() => {
+    setIntento((n) => n + 1)
+  }, [])
+
   // Solo se muestran datos de la cuenta y del alumno elegidos ahora
   const actual =
     datos && esRespuestaVigente(datos, { cuenta, idAlumno }) ? datos.resultado : null
 
-  return { seleccion, actual, reintentar }
+  return { seleccion, actual, reintentar, recargar }
 }

@@ -12,6 +12,7 @@ import Ingresar from './pantallas/Ingresar'
 import Inscripciones from './pantallas/Inscripciones'
 import Inicio from './pantallas/Inicio'
 import NuevaContrasena from './pantallas/NuevaContrasena'
+import PagarFactura from './pantallas/PagarFactura'
 import Pagos from './pantallas/Pagos'
 import Perfil from './pantallas/Perfil'
 import Recuperar from './pantallas/Recuperar'
@@ -62,8 +63,8 @@ export default function AppRoutes() {
   // El service worker y el manifiesto usan el scope /app/ (con barra)
   if (pathname === '/app') return <Navigate to='/app/' replace />
 
-  // Cuotas y Pagos (HU51 a HU53, solo el padre) e Inscripciones (HU59)
-  // consultan datos. Sin RLS, por decisión del equipo (CLAUDE.md 3.1): los
+  // Cuotas, pagar con transferencia y Pagos (HU51 a HU56, solo el padre)
+  // e Inscripciones (HU59). Sin RLS, por decisión del equipo (CLAUDE.md 3.1): los
   // filtros por usuario y por rol están en los servicios.
   return (
     <ProveedorSesion>
@@ -79,6 +80,14 @@ export default function AppRoutes() {
               element={
                 <RutaSeccion seccion='cuotas'>
                   <Cuotas />
+                </RutaSeccion>
+              }
+            />
+            <Route
+              path='cuotas/pagar/:idFactura'
+              element={
+                <RutaSeccion seccion='cuotas'>
+                  <PagarFactura />
                 </RutaSeccion>
               }
             />

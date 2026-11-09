@@ -1,21 +1,26 @@
 // ═══════════════════════════════════════════════════════════════
-//  CUENTA DEL ALUMNO EN LA APP (HU51, HU52 parcial y HU53 parcial)
+//  CUENTA DEL ALUMNO EN LA APP (HU51 a HU56)
 // ═══════════════════════════════════════════════════════════════
 // Lógica pura (sin Supabase) para probarla con Vitest. Arma lo que ve el
-// padre a partir de tres lecturas del mismo alumno:
-//   - v_facturas_saldo y v_factura_items_saldo (contrato de etapa17):
+// padre a partir de cuatro lecturas del mismo alumno:
+//   - v_facturas_saldo y v_factura_items_saldo (etapa17 y etapa18):
 //     total emitido, saldo, estado y detalle de los períodos con factura;
-//   - cuotas: solo para las cuotas heredadas, sin factura, y para la
-//     fecha y el método de los pagos registrados por la administración.
+//   - cuotas: las heredadas, sin factura, y los pagos registrados por la
+//     administración (fecha y método);
+//   - pagos (etapa18): los comprobantes de transferencia cargados por el
+//     padre, con sus ítems.
 // Reglas:
 //   - Una cuota con factura se lee de su ítem Cuota (id_cuota): no se
 //     suma otra vez por fuera de la factura.
 //   - Neto 0 es "Sin cargo": no es deuda ni dinero cobrado. "Cubierta por
 //     beca" solo si el dato lo dice (cubierta_por_beca o el porcentaje
 //     copiado en el ítem); no se deduce de la beca actual.
-//   - Hasta HU54 a HU56 no hay comprobantes: los pagos son registros
-//     administrativos (cuotas.estado = 'Pagada'), con la fecha de pago
-//     registrada, que no es una fecha de aprobación.
+//   - Cargar un comprobante no acredita: el ítem queda "En revision" y
+//     sigue en el saldo hasta que se aprueba.
+//   - Un pago aprobado muestra su fecha de aprobación y su comprobante de
+//     pago. Los pagos registrados por la administración (cuota Pagada sin
+//     comprobante aprobado) se muestran como tales, con la fecha de pago
+//     registrada: no se les inventa comprobante ni aprobación.
 import { ESTADOS_IMPAGOS, netoCuota } from '../reglasCuotas'
 import { nombrePeriodo, numeroFactura } from '../reglasFacturacion'
 import type { EstadoCobro, EstadoPagoItem, Periodo } from '../reglasFacturacion'
@@ -33,6 +38,7 @@ export interface FilaFacturaSaldo {
   cobrado: Numero
   saldo: Numero
   estado_cobro: EstadoCobro
+  en_revision?: Numero | null
 }
 
 export interface FilaItemSaldo {
@@ -49,6 +55,7 @@ export interface FilaItemSaldo {
   estado_pago: EstadoPagoItem
   fecha_pago: string | null
   saldo: Numero
+  id_pago?: number | null
 }
 
 export interface FilaCuota {
@@ -65,10 +72,24 @@ export interface FilaCuota {
   cubierta_por_beca: boolean | null
 }
 
+export type EstadoComprobante = 'En revision' | 'Aprobado' | 'Rechazado'
+
+export interface FilaPago {
+  id_pago: number
+  id_factura: number
+  estado: EstadoComprobante
+  monto_pagado: Numero
+  fecha_pago: string // fecha de carga
+  fecha_revision: string | null
+  motivo_rechazo: string | null
+  pago_items: Array<{ id_item: number; importe: Numero; activo: boolean }> | null
+}
+
 export interface LecturaCuenta {
   facturas: FilaFacturaSaldo[]
   items: FilaItemSaldo[]
   cuotas: FilaCuota[]
+  pagos: FilaPago[]
 }
 
 // ── Lo que muestra la app ──────────────────────────────────────
@@ -81,6 +102,8 @@ export interface ConceptoFactura {
   estado: EstadoPagoItem
   /** Porcentaje de beca copiado en el ítem al emitir (beca parcial). */
   beca: number | null
+  /** Se puede elegir en un comprobante nuevo (Pendiente y con saldo). */
+  seleccionable: boolean
 }
 
 export interface FacturaPendiente {
@@ -92,6 +115,8 @@ export interface FacturaPendiente {
   totalEmitido: number
   pagado: number
   saldo: number
+  /** Parte del saldo con un comprobante en revisión (no acreditado). */
+  enRevision: number
   estado: EstadoCobro
   vencida: boolean
   /** Conceptos con importe (los de neto 0 van a "Sin cargo"). */
@@ -111,11 +136,15 @@ export interface CuotaPagada {
   clave: string
   periodo: Periodo
   importe: number
-  /** Fecha de pago registrada por la administración; null si falta. */
-  fechaPago: string | null
+  /** 'Comprobante': aprobado en la app; 'Registro administrativo': cargado por la administración. */
+  origen: 'Comprobante' | 'Registro administrativo'
+  /** Comprobante: fecha de aprobación. Registro administrativo: fecha de pago registrada (o null). */
+  fecha: string | null
   metodo: string | null
   /** Número de la factura del período, o null si es una cuota heredada. */
   factura: string | null
+  /** Comprobante aprobado: su id, para descargar el comprobante de pago. */
+  idPago: number | null
 }
 
 export interface ConceptoSinCargo {
@@ -131,19 +160,36 @@ export interface EstadoDeCuenta {
   cuotasHeredadas: CuotaHeredada[]
   /** Saldo de las facturas + importe de las cuotas heredadas impagas. */
   saldoPendiente: number
+  /** Parte del saldo pendiente con comprobantes en revisión. */
+  enRevision: number
   pagadas: CuotaPagada[]
   sinCargo: ConceptoSinCargo[]
 }
 
-export interface PagoRegistrado {
-  clave: string
-  periodo: Periodo
-  importe: number
-  fecha: string | null
-  metodo: string | null
-  factura: string | null
-  origen: 'Registro administrativo'
-}
+export type MovimientoPago =
+  | {
+      tipo: 'comprobante'
+      clave: string
+      idPago: number
+      estado: EstadoComprobante
+      importe: number
+      fechaCarga: string
+      fechaRevision: string | null
+      motivo: string | null
+      factura: string
+      periodo: Periodo | null
+      conceptos: string[]
+    }
+  | {
+      tipo: 'administrativo'
+      clave: string
+      origen: 'Registro administrativo'
+      importe: number
+      fecha: string | null
+      metodo: string | null
+      factura: string | null
+      periodo: Periodo
+    }
 
 // ── Ayudas ─────────────────────────────────────────────────────
 const num = (v: Numero | null | undefined) => Number(v ?? 0)
@@ -163,11 +209,19 @@ export function hoyLocal(fecha = new Date()): string {
 }
 
 /** Cuotas que ya están dentro de una factura (por su ítem Cuota). */
-function cuotasFacturadas(items: readonly FilaItemSaldo[]): Map<number, number> {
-  const mapa = new Map<number, number>()
-  for (const i of items) if (i.id_cuota !== null) mapa.set(i.id_cuota, i.id_factura)
+function cuotasFacturadas(items: readonly FilaItemSaldo[]): Map<number, FilaItemSaldo> {
+  const mapa = new Map<number, FilaItemSaldo>()
+  for (const i of items) if (i.id_cuota !== null) mapa.set(i.id_cuota, i)
   return mapa
 }
+
+/** Ids de los comprobantes aprobados. */
+const aprobados = (pagos: readonly FilaPago[]) =>
+  new Set(pagos.filter((p) => p.estado === 'Aprobado').map((p) => p.id_pago))
+
+/** Ítem pagado con un comprobante aprobado. */
+const pagadoConComprobante = (i: FilaItemSaldo, ok: Set<number>) =>
+  i.estado_pago === 'Pagado' && i.id_pago != null && ok.has(i.id_pago)
 
 /** Impaga y con fecha de vencimiento anterior a hoy, o marcada así. */
 function cuotaVencida(c: FilaCuota, hoy: string): boolean {
@@ -183,10 +237,11 @@ export function armarEstadoDeCuenta(
   lectura: LecturaCuenta,
   hoy: string = hoyLocal(),
 ): EstadoDeCuenta {
-  const { facturas, items, cuotas } = lectura
+  const { facturas, items, cuotas, pagos } = lectura
   const facturadas = cuotasFacturadas(items)
   const cuotaPorId = new Map(cuotas.map((c) => [c.id_cuota, c]))
   const heredadas = cuotas.filter((c) => !facturadas.has(c.id_cuota))
+  const ok = aprobados(pagos)
 
   // HU51: facturas con saldo, con el detalle de sus conceptos con importe
   const facturasPendientes = facturas
@@ -201,6 +256,7 @@ export function armarEstadoDeCuenta(
         totalEmitido: num(f.total),
         pagado: num(f.cobrado),
         saldo: num(f.saldo),
+        enRevision: num(f.en_revision),
         estado: f.estado_cobro,
         vencida: f.estado_cobro === 'Vencida',
         conceptos: items
@@ -213,6 +269,7 @@ export function armarEstadoDeCuenta(
             saldo: num(i.saldo),
             estado: i.estado_pago,
             beca: i.porcentaje_beca === null ? null : num(i.porcentaje_beca),
+            seleccionable: i.estado_pago === 'Pendiente' && num(i.saldo) > 0,
           })),
       }),
     )
@@ -237,16 +294,20 @@ export function armarEstadoDeCuenta(
   // HU52: cuotas pagadas (ítem Cuota pagado o cuota heredada pagada)
   const pagadasFactura = items
     .filter((i) => i.concepto === 'Cuota' && i.estado_pago === 'Pagado')
-    .map(
-      (i): CuotaPagada => ({
+    .map((i): CuotaPagada => {
+      const conComprobante = pagadoConComprobante(i, ok)
+      const cuota = i.id_cuota !== null ? cuotaPorId.get(i.id_cuota) : undefined
+      return {
         clave: `item-${i.id_item}`,
         periodo: { anio: i.anio, mes: i.mes },
         importe: num(i.neto),
-        fechaPago: i.fecha_pago,
-        metodo: (i.id_cuota !== null ? cuotaPorId.get(i.id_cuota)?.metodo_pago : null) ?? null,
+        origen: conComprobante ? 'Comprobante' : 'Registro administrativo',
+        fecha: i.fecha_pago,
+        metodo: cuota?.metodo_pago ?? null,
         factura: numeroFactura(i.id_factura),
-      }),
-    )
+        idPago: conComprobante ? (i.id_pago ?? null) : null,
+      }
+    })
   const pagadasHeredadas = heredadas
     .filter((c) => c.estado === 'Pagada' && netoCuota(c) > 0)
     .map(
@@ -254,9 +315,11 @@ export function armarEstadoDeCuenta(
         clave: `cuota-${c.id_cuota}`,
         periodo: { anio: c.anio, mes: c.mes },
         importe: netoCuota(c),
-        fechaPago: c.fecha_pago,
+        origen: 'Registro administrativo',
+        fecha: c.fecha_pago,
         metodo: c.metodo_pago,
         factura: null,
+        idPago: null,
       }),
     )
   const pagadas = [...pagadasFactura, ...pagadasHeredadas].sort(
@@ -293,36 +356,71 @@ export function armarEstadoDeCuenta(
     facturasPendientes.reduce((s, f) => s + f.saldo, 0) +
       cuotasHeredadas.reduce((s, c) => s + c.importe, 0),
   )
+  const enRevision = centavos(facturasPendientes.reduce((s, f) => s + f.enRevision, 0))
 
-  return { facturasPendientes, cuotasHeredadas, saldoPendiente, pagadas, sinCargo }
+  return { facturasPendientes, cuotasHeredadas, saldoPendiente, enRevision, pagadas, sinCargo }
 }
 
-// ── Historial de pagos (HU53, parcial) ─────────────────────────
-// Solo los pagos registrados por la administración: cada cuota pagada
-// con importe. Las cubiertas por beca no son pagos. Más recientes
-// primero; los que no tienen fecha registrada, al final.
-export function armarHistorialPagos(lectura: LecturaCuenta): PagoRegistrado[] {
-  const facturadas = cuotasFacturadas(lectura.items)
-  return lectura.cuotas
+// ── Historial de pagos (HU53) ──────────────────────────────────
+// Comprobantes cargados en la app (En revision, Aprobado o Rechazado) y
+// pagos registrados por la administración. Una cuota pagada con un
+// comprobante aprobado aparece una sola vez: como comprobante. Las
+// cubiertas por beca no son pagos. Más recientes primero.
+export function armarHistorialPagos(lectura: LecturaCuenta): MovimientoPago[] {
+  const { items, cuotas, pagos, facturas } = lectura
+  const ok = aprobados(pagos)
+  const facturadas = cuotasFacturadas(items)
+  const itemPorId = new Map(items.map((i) => [i.id_item, i]))
+  const facturaPorId = new Map(facturas.map((f) => [f.id_factura, f]))
+
+  const comprobantes = pagos.map((p): MovimientoPago => {
+    const f = facturaPorId.get(p.id_factura)
+    return {
+      tipo: 'comprobante',
+      clave: `pago-${p.id_pago}`,
+      idPago: p.id_pago,
+      estado: p.estado,
+      importe: num(p.monto_pagado),
+      fechaCarga: p.fecha_pago,
+      fechaRevision: p.fecha_revision,
+      motivo: p.motivo_rechazo,
+      factura: numeroFactura(p.id_factura),
+      periodo: f ? { anio: f.anio, mes: f.mes } : null,
+      conceptos: (p.pago_items ?? []).map(
+        (pi) => itemPorId.get(pi.id_item)?.descripcion ?? 'Concepto',
+      ),
+    }
+  })
+
+  const administrativos = cuotas
     .filter((c) => c.estado === 'Pagada' && netoCuota(c) > 0)
-    .map((c): PagoRegistrado => {
-      const idFactura = facturadas.get(c.id_cuota)
+    .filter((c) => {
+      const item = facturadas.get(c.id_cuota)
+      return !(item && pagadoConComprobante(item, ok))
+    })
+    .map((c): MovimientoPago => {
+      const item = facturadas.get(c.id_cuota)
       return {
+        tipo: 'administrativo',
         clave: `cuota-${c.id_cuota}`,
-        periodo: { anio: c.anio, mes: c.mes },
+        origen: 'Registro administrativo',
         importe: netoCuota(c),
         fecha: c.fecha_pago,
         metodo: c.metodo_pago,
-        factura: idFactura === undefined ? null : numeroFactura(idFactura),
-        origen: 'Registro administrativo',
+        factura: item ? numeroFactura(item.id_factura) : null,
+        periodo: { anio: c.anio, mes: c.mes },
       }
     })
-    .sort((a, b) => {
-      if (a.fecha !== b.fecha) {
-        if (a.fecha === null) return 1
-        if (b.fecha === null) return -1
-        return b.fecha.localeCompare(a.fecha)
-      }
-      return clavePeriodo(b.periodo) - clavePeriodo(a.periodo)
-    })
+
+  const momento = (m: MovimientoPago): number => {
+    const f = m.tipo === 'comprobante' ? (m.fechaRevision ?? m.fechaCarga) : m.fecha
+    return f ? Date.parse(f) : Number.NEGATIVE_INFINITY
+  }
+  // Sin fecha registrada, al final (sin restar infinitos)
+  return [...comprobantes, ...administrativos].sort((a, b) => {
+    const x = momento(a)
+    const y = momento(b)
+    if (x === y) return 0
+    return y > x ? 1 : -1
+  })
 }

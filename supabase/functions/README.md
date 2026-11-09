@@ -72,3 +72,72 @@ Si obtienes un error `500 Internal Server Error`:
 Si obtienes un error `CORS`:
 - Verifica que la función tenga los headers CORS configurados
 - Asegúrate de que el método OPTIONS esté manejado correctamente
+
+---
+
+# Edge Function `pagos` (HU54 a HU56)
+
+Comprobantes de transferencia, URLs firmadas y comprobante de pago en PDF.
+Código: `supabase/functions/pagos/index.ts` (un solo archivo, para poder
+pegarlo en el dashboard).
+
+> **No redesplegar `crear-usuario`** desde este repo: su `index.ts` está casi
+> entero comentado y no coincide con la función que funciona (CLAUDE.md, 11).
+
+## Antes
+
+1. Ejecutar `supabase/sql/verificaciones/relevamiento_etapa18.sql` (todo `OK`
+   o `INFO`).
+2. Ejecutar `supabase/sql/etapa18_comprobantes.sql` (crea el bucket privado
+   `pagos`, las funciones y los permisos) y
+   `supabase/sql/verificaciones/pruebas_etapa18.sql`.
+
+## Despliegue desde el dashboard
+
+1. **Edge Functions → Deploy a new function → Via Editor**. Nombre: `pagos`.
+2. Pegar **todo** el contenido de `supabase/functions/pagos/index.ts` y
+   desplegar.
+3. En la configuración de la función, dejar **Verify JWT** activado (la
+   función además verifica el token con `auth.getUser`).
+4. Secrets: usa `SUPABASE_URL` (la setea Supabase) y
+   `SUPABASE_SERVICE_ROLE_KEY` (ya existe para las otras funciones). No hace
+   falta agregar ninguno. La service role **nunca** va al frontend.
+5. Comprobar que figure como **Active**.
+
+Con la CLI (si se instala): `supabase functions deploy pagos`.
+
+## Qué hace
+
+- `subir` (Padre): valida el tamaño (5 MB) y el tipo real del archivo (JPG,
+  PNG o PDF por sus primeros bytes); **antes de tocar Storage** verifica la
+  identidad, la pertenencia actual de la factura y si la clave ya es un envío
+  existente; sube a `comprobantes/{factura}/{clave}/{uuid}.{ext}` **sin
+  upsert**; registra en la base; si no quedó vinculado, borra **solo su
+  propio** archivo.
+- `estado_clave` (Padre): recupera un envío cuya respuesta se perdió.
+- `archivo`: URL firmada de 60 s del archivo de transferencia (Admin,
+  Directivo o el padre actual del alumno).
+- `revisar` (Admin o Directivo): aprueba o rechaza con motivo; al aprobar
+  intenta generar el comprobante de pago (si falla, queda "pendiente" y se
+  genera después sin duplicar).
+- `recibo`: genera (si falta) el PDF en `recibos/{id_pago}.pdf`, sin upsert,
+  con datos históricos (factura, ítems del pago, importes y fecha de
+  aprobación), y devuelve una URL firmada de 60 s.
+
+Los errores llegan como `{ ok: false, codigo }` (`PAG_...`, `CUO_...`) y la
+app los traduce. En los logs solo se registran códigos, nunca datos.
+
+## Archivos huérfanos
+
+Si la función se corta entre la subida y el registro, puede quedar un archivo
+sin comprobante. Para listarlos (solo lectura) en el SQL Editor:
+
+```sql
+select o.name, o.created_at
+  from storage.objects o
+ where o.bucket_id = 'pagos' and o.name like 'comprobantes/%'
+   and not exists (select 1 from public.pagos p where p.archivo_path = o.name)
+ order by o.created_at;
+```
+
+Se borran desde **Storage → pagos**, revisando antes cada uno.

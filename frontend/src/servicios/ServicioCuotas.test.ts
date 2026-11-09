@@ -31,6 +31,7 @@ vi.mock('../lib/supabase', () => ({
       const q = {
         select: registrar('select'),
         eq: registrar('eq'),
+        not: registrar('not'),
         order: registrar('order'),
         then: (ok: (v: unknown) => unknown, mal: (e: unknown) => unknown) =>
           (rechazo instanceof Error
@@ -47,7 +48,7 @@ import { ServicioCuotas, MENSAJE_ERROR_CUOTAS } from './ServicioCuotas'
 import { ServicioPagos, MENSAJE_ERROR_PAGOS } from './ServicioPagos'
 import { MENSAJES_CUENTA } from './lecturaCuentaAlumno'
 
-const TABLAS = ['v_facturas_saldo', 'v_factura_items_saldo', 'cuotas']
+const TABLAS = ['v_facturas_saldo', 'v_factura_items_saldo', 'cuotas', 'pagos']
 
 const responder = (tabla: string, respuesta: unknown) => {
   estado.respuestas.push({ tabla, respuesta })
@@ -95,10 +96,12 @@ describe('acceso a cuotas y pagos (HU51 a HU53)', () => {
 })
 
 describe('ServicioCuotas.estadoDeCuenta (HU51 y HU52)', () => {
-  it('filtra las tres lecturas por el alumno elegido, también la de los vínculos de cuotas', async () => {
+  it('filtra las cuatro lecturas por el alumno elegido, también la de los vínculos de cuotas', async () => {
     await ServicioCuotas.estadoDeCuenta(7, [3, 7], 'Padre')
     expect(estado.llamadas.map((l) => l.tabla).sort()).toEqual([...TABLAS].sort())
     for (const tabla of TABLAS) expect(argumentos(tabla, 'eq')).toEqual([['id_alumno', 7]])
+    // Solo comprobantes (filas con factura) de la tabla pagos
+    expect(argumentos('pagos', 'not')).toEqual([['id_factura', 'is', null]])
   })
 
   it('arma el estado de cuenta con la factura y la cuota heredada, sin duplicar la cuota facturada', async () => {
@@ -187,30 +190,34 @@ describe('ServicioCuotas.estadoDeCuenta (HU51 y HU52)', () => {
   })
 })
 
-describe('ServicioPagos.historial (HU53 parcial)', () => {
-  it('devuelve los pagos registrados por la administración, sin leer la tabla pagos', async () => {
+describe('ServicioPagos.historial (HU53)', () => {
+  it('une comprobantes y pagos administrativos sin duplicar la cuota aprobada', async () => {
+    responder('v_factura_items_saldo', {
+      data: [
+        { id_item: 5, id_factura: 3, anio: 2026, mes: 11, concepto: 'Cuota', id_cuota: 22, descripcion: 'Cuota', porcentaje_beca: null, neto: '10000.00', cubierta_por_beca: false, estado_pago: 'Pagado', fecha_pago: '2026-11-05', saldo: 0, id_pago: 4 },
+      ],
+      error: null,
+    })
     responder('cuotas', {
       data: [
         { id_cuota: 21, anio: 2026, mes: 10, monto_base: 10000, recargo: 0, descuento: 0, fecha_vencimiento: '2026-10-10', estado: 'Pagada', fecha_pago: '2026-10-04', metodo_pago: 'Transferencia', cubierta_por_beca: false },
+        { id_cuota: 22, anio: 2026, mes: 11, monto_base: 10000, recargo: 0, descuento: 0, fecha_vencimiento: '2026-11-10', estado: 'Pagada', fecha_pago: '2026-11-05', metodo_pago: 'Transferencia', cubierta_por_beca: false },
+      ],
+      error: null,
+    })
+    responder('pagos', {
+      data: [
+        { id_pago: 4, id_factura: 3, estado: 'Aprobado', monto_pagado: '10000.00', fecha_pago: '2026-11-04T10:00:00-03:00', fecha_revision: '2026-11-05T09:00:00-03:00', motivo_rechazo: null, pago_items: [{ id_item: 5, importe: 10000, activo: true }] },
       ],
       error: null,
     })
     const r = await ServicioPagos.historial(7, [7], 'Padre')
-    expect(r).toEqual({
-      ok: true,
-      pagos: [
-        {
-          clave: 'cuota-21',
-          periodo: { anio: 2026, mes: 10 },
-          importe: 10000,
-          fecha: '2026-10-04',
-          metodo: 'Transferencia',
-          factura: null,
-          origen: 'Registro administrativo',
-        },
-      ],
-    })
-    expect(estado.llamadas.some((l) => l.tabla === 'pagos')).toBe(false)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.pagos.map((m) => [m.clave, m.tipo])).toEqual([
+      ['pago-4', 'comprobante'],
+      ['cuota-21', 'administrativo'],
+    ])
     for (const tabla of TABLAS) expect(argumentos(tabla, 'eq')).toEqual([['id_alumno', 7]])
   })
 

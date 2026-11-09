@@ -70,6 +70,8 @@ Se mantienen RNF1 a RNF5 de la parte web y se agregan los siguientes:
 
 > **Nota del 05/11/2026 (decisión del equipo).** La aplicación se presenta como una demo académica con datos ficticios y sin usuarios reales, y RLS queda fuera del alcance como limitación aceptada. El requerimiento original no se elimina ni se da por cumplido. **RNF7 no puede darse por completamente cumplido** sin esa protección: los filtros y controles del frontend no garantizan el aislamiento de datos ante consultas directas a la API. Se mantiene el Storage privado cuando corresponda, y la demo debe usar comprobantes inventados.
 
+> **Nota del 08/11/2026 (decisión del equipo, ampliación de RNF7).** RNF7 nombraba solo al padre del alumno y al administrador. Por la decisión de compartir las funciones de gestión, **Admin y Directivo** consultan los comprobantes de transferencia y los aprueban o rechazan (HU55). Docente y Alumno no acceden. El Padre consulta únicamente los comprobantes de sus hijos. Sigue vigente la limitación por no implementar RLS: los archivos están en un bucket privado y solo se abren con URLs firmadas que entrega la Edge Function después de controlar rol y pertenencia, pero las filas de `pagos` se pueden leer por la API con cualquier sesión.
+
 ### 10.3. Clasificación del tipo de sistema de información
 Se mantiene la clasificación de la parte web: un Sistema de Procesamiento de Transacciones (TPS) con características de Sistema de Información Gerencial (MIS). La aplicación móvil agrega nuevas transacciones (facturación mensual, carga y aprobación de comprobantes y emisión de comprobantes de pago) y nuevos listados de ingresos y pagos para la Dirección (RF15), que refuerzan el componente gerencial.
 
