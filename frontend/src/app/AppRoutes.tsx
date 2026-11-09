@@ -8,6 +8,8 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from './AppLayout'
 import AvisoActualizacion from './AvisoActualizacion'
 import Cuotas from './pantallas/Cuotas'
+import Deuda from './pantallas/Deuda'
+import Facturas from './pantallas/Facturas'
 import Ingresar from './pantallas/Ingresar'
 import Inscripciones from './pantallas/Inscripciones'
 import Inicio from './pantallas/Inicio'
@@ -63,7 +65,8 @@ export default function AppRoutes() {
   // El service worker y el manifiesto usan el scope /app/ (con barra)
   if (pathname === '/app') return <Navigate to='/app/' replace />
 
-  // Cuotas, pagar con transferencia y Pagos (HU51 a HU56, solo el padre)
+  // Cuotas, pagar con transferencia y Pagos (HU51 a HU56), Facturas por
+  // período y deuda por ítem (HU57 y HU58), solo el padre,
   // e Inscripciones (HU59). Sin RLS, por decisión del equipo (CLAUDE.md 3.1): los
   // filtros por usuario y por rol están en los servicios.
   return (
@@ -88,6 +91,22 @@ export default function AppRoutes() {
               element={
                 <RutaSeccion seccion='cuotas'>
                   <PagarFactura />
+                </RutaSeccion>
+              }
+            />
+            <Route
+              path='facturas'
+              element={
+                <RutaSeccion seccion='facturas'>
+                  <Facturas />
+                </RutaSeccion>
+              }
+            />
+            <Route
+              path='facturas/deuda'
+              element={
+                <RutaSeccion seccion='facturas'>
+                  <Deuda />
                 </RutaSeccion>
               }
             />

@@ -142,13 +142,13 @@ async function rechazar(
 }
 
 // ── Menú por rol (HU45) ───────────────────────────────────────
-export type Seccion = 'inicio' | 'cuotas' | 'pagos' | 'inscripciones' | 'perfil'
+export type Seccion = 'inicio' | 'cuotas' | 'facturas' | 'pagos' | 'inscripciones' | 'perfil'
 
 // Map en lugar de objeto: un rol que no está en la lista (por ejemplo,
 // 'constructor' o un valor inesperado de la base) no encuentra nada.
 const SECCIONES_POR_ROL: ReadonlyMap<string, readonly Seccion[]> = new Map([
-  // El padre ve cuotas, pagos e inscripciones de sus hijos
-  ['Padre', ['inicio', 'cuotas', 'pagos', 'inscripciones', 'perfil']],
+  // El padre ve cuotas, facturas y deuda, pagos e inscripciones de sus hijos
+  ['Padre', ['inicio', 'cuotas', 'facturas', 'pagos', 'inscripciones', 'perfil']],
   // El alumno ve solo sus inscripciones (no ve pagos)
   ['Alumno', ['inicio', 'inscripciones', 'perfil']],
 ])

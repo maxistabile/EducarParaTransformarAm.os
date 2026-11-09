@@ -4,7 +4,7 @@
 import { useSesionApp } from '../sesion/contextoSesion'
 
 const TEXTO_PADRE =
-  'Desde esta app vas a poder consultar las cuotas, cargar los comprobantes de pago y ver las inscripciones de tus hijos.'
+  'Desde esta app vas a poder consultar las cuotas, las facturas y la deuda, cargar los comprobantes de pago y ver las inscripciones de tus hijos.'
 const TEXTO_ALUMNO = 'Desde esta app vas a poder ver tus inscripciones.'
 
 export default function Inicio() {

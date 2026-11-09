@@ -205,6 +205,15 @@ export const ServicioPagos = {
     return esFallo(r) ? r : { ok: true, url: String(r.url) }
   },
 
+  /**
+   * HU57: URL firmada (60 s) del PDF de la FACTURA (no es el comprobante
+   * de pago); la Edge Function lo genera si falta, con datos históricos.
+   */
+  async urlFactura(idFactura: number): Promise<{ ok: true; url: string } | Fallo> {
+    const r = await invocar({ accion: 'factura', id_factura: idFactura })
+    return esFallo(r) ? r : { ok: true, url: String(r.url) }
+  },
+
   /** HU55 (web): comprobantes por estado, los más antiguos primero. */
   async comprobantes(
     estado: EstadoComprobante,

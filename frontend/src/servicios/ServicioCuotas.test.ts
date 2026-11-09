@@ -44,7 +44,7 @@ vi.mock('../lib/supabase', () => ({
   },
 }))
 
-import { ServicioCuotas, MENSAJE_ERROR_CUOTAS } from './ServicioCuotas'
+import { ServicioCuotas, MENSAJE_ERROR_CUOTAS, MENSAJE_ERROR_DEUDA, MENSAJE_ERROR_FACTURAS } from './ServicioCuotas'
 import { ServicioPagos, MENSAJE_ERROR_PAGOS } from './ServicioPagos'
 import { MENSAJES_CUENTA } from './lecturaCuentaAlumno'
 
@@ -227,5 +227,57 @@ describe('ServicioPagos.historial (HU53)', () => {
       ok: false,
       mensaje: MENSAJE_ERROR_PAGOS,
     })
+  })
+})
+
+describe('ServicioCuotas.facturas y deudaPorItem (HU57 y HU58)', () => {
+  it('solo el padre consulta, y solo alumnos de la sesión, sin tocar la base', async () => {
+    expect(await ServicioCuotas.facturas(9, [3, 7], 'Padre')).toEqual({ ok: false, mensaje: MENSAJES_CUENTA.ajeno })
+    expect(await ServicioCuotas.deudaPorItem(9, [3, 7], 'Padre')).toEqual({ ok: false, mensaje: MENSAJES_CUENTA.ajeno })
+    expect(await ServicioCuotas.facturas(5, [5], 'Alumno')).toEqual({ ok: false, mensaje: MENSAJES_CUENTA.soloPadre })
+    expect(await ServicioCuotas.deudaPorItem(5, [5], 'Alumno')).toEqual({ ok: false, mensaje: MENSAJES_CUENTA.soloPadre })
+    expect(await ServicioCuotas.deudaPorItem(5, [5], null)).toMatchObject({ ok: false })
+    expect(estado.llamadas).toHaveLength(0)
+  })
+
+  it('leen las cuatro tablas filtradas por el alumno elegido', async () => {
+    await ServicioCuotas.facturas(7, [3, 7], 'Padre')
+    await ServicioCuotas.deudaPorItem(7, [3, 7], 'Padre')
+    expect(estado.llamadas.map((l) => l.tabla).sort()).toEqual([...TABLAS, ...TABLAS].sort())
+    for (const tabla of TABLAS) expect(argumentos(tabla, 'eq')).toEqual([['id_alumno', 7], ['id_alumno', 7]])
+  })
+
+  it('un error de la base da su mensaje y no rechaza', async () => {
+    responder('v_facturas_saldo', { data: null, error: { code: '42P01', message: 'no existe' } })
+    expect(await ServicioCuotas.facturas(7, [7], 'Padre')).toEqual({ ok: false, mensaje: MENSAJE_ERROR_FACTURAS })
+    responder('pagos', { data: null, error: { code: '42703', message: 'columna' } })
+    expect(await ServicioCuotas.deudaPorItem(7, [7], 'Padre')).toEqual({ ok: false, mensaje: MENSAJE_ERROR_DEUDA })
+  })
+
+  it('una lectura rechazada (red) también da el mensaje', async () => {
+    estado.respuestas.push({ tabla: 'cuotas', respuesta: null, rechazo: new TypeError('Failed to fetch') })
+    expect(await ServicioCuotas.deudaPorItem(7, [7], 'Padre')).toEqual({ ok: false, mensaje: MENSAJE_ERROR_DEUDA })
+  })
+
+  it('arma las facturas y la deuda con los datos leídos', async () => {
+    const fac = { id_factura: 4, anio: 2026, mes: 12, fecha_emision: '2026-11-30', fecha_vencimiento: '2026-12-10', total: '16000.00', cobrado: '0.00', saldo: '16000.00', estado_cobro: 'Pendiente', en_revision: '6000.00' }
+    const items = [
+      { id_item: 1, id_factura: 4, anio: 2026, mes: 12, concepto: 'Cuota', id_cuota: 21, descripcion: 'Cuota mensual', porcentaje_beca: null, neto: '10000.00', cubierta_por_beca: false, estado_pago: 'Pendiente', fecha_pago: null, saldo: '10000.00', id_pago: null },
+      { id_item: 2, id_factura: 4, anio: 2026, mes: 12, concepto: 'Comedor', id_cuota: null, descripcion: 'Comedor', porcentaje_beca: null, neto: '6000.00', cubierta_por_beca: false, estado_pago: 'En revision', fecha_pago: null, saldo: '6000.00', id_pago: 3 },
+    ]
+    const cuotas = [{ id_cuota: 21, anio: 2026, mes: 12, monto_base: 10000, recargo: 0, descuento: 0, fecha_vencimiento: '2026-12-10', estado: 'Pendiente', fecha_pago: null, metodo_pago: null, cubierta_por_beca: false }]
+    const pagos = [{ id_pago: 3, id_factura: 4, estado: 'En revision', monto_pagado: '6000.00', fecha_pago: '2026-12-01T10:00:00-03:00', fecha_revision: null, motivo_rechazo: null, pago_items: [{ id_item: 2, importe: '6000.00', activo: true }] }]
+    for (const [t, d] of [['v_facturas_saldo', [fac]], ['v_factura_items_saldo', items], ['cuotas', cuotas], ['pagos', pagos]] as const) {
+      responder(t, { data: d, error: null })
+    }
+    const r = await ServicioCuotas.facturas(7, [7], 'Padre')
+    expect(r.ok && r.facturas.map((f) => [f.numero, f.saldo, f.comprobantes.length])).toEqual([['F-000004', 16000, 1]])
+
+    for (const [t, d] of [['v_facturas_saldo', [fac]], ['v_factura_items_saldo', items], ['cuotas', cuotas], ['pagos', pagos]] as const) {
+      responder(t, { data: d, error: null })
+    }
+    const d = await ServicioCuotas.deudaPorItem(7, [7], 'Padre')
+    // La cuota facturada no se duplica como heredada; En revisión sigue en el total
+    expect(d.ok && [d.deuda.total, d.deuda.enRevision, d.deuda.grupos.length]).toEqual([16000, 6000, 2])
   })
 })

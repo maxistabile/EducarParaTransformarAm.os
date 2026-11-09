@@ -16,6 +16,7 @@ interface Pestania {
 const PESTANIAS: ReadonlyMap<Seccion, Pestania> = new Map([
   ['inicio', { ruta: '/app/', texto: 'Inicio', icono: '🏠' }],
   ['cuotas', { ruta: '/app/cuotas', texto: 'Cuotas', icono: '💳' }],
+  ['facturas', { ruta: '/app/facturas', texto: 'Facturas', icono: '📄' }],
   ['pagos', { ruta: '/app/pagos', texto: 'Pagos', icono: '🧾' }],
   ['inscripciones', { ruta: '/app/inscripciones', texto: 'Inscripciones', icono: '📋' }],
   ['perfil', { ruta: '/app/perfil', texto: 'Perfil', icono: '👤' }],
@@ -74,7 +75,7 @@ export default function AppLayout() {
               <li key={p.ruta}>
                 <NavLink
                   to={p.ruta}
-                  end
+                  end={p.ruta === '/app/'}
                   className={({ isActive }) =>
                     `flex flex-col items-center gap-0.5 py-2 text-[11px] font-bold ${
                       isActive ? 'text-purple-700' : 'text-textMuted'
