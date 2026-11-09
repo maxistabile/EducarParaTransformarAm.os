@@ -17,7 +17,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 | Parte 2 – Sistema de gestión web (RF1 a RF9, HU1 a HU40) | ✅ Terminado, desplegado y evaluado (27/10) |
 | TP Unidad 4 – CI/CD y optimización | ✅ Entregado |
 | TP Unidad 5 – Pruebas y calidad | ✅ Entregado |
-| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18), HU41, HU42 y parte de HU45 (PR #19), HU43 y HU44 (PR #24), HU46 a HU49 (PR #27), HU50 etapa A (PR #30), HU59 (PR #32), HU51 con HU52 y HU53 parciales (PR #34) y **HU54 a HU56 con el cierre de HU52 y HU53 (PR #36, `6590cee`)**. HU45 no queda completa: ver sección 3.1. **HU50 parcial** (falta la etapa B). **Corrección de envíos simultáneos de comprobantes (`etapa19`) en curso** en `fix/comprobantes-envios-simultaneos`. |
+| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18), HU41, HU42 y parte de HU45 (PR #19), HU43 y HU44 (PR #24), HU46 a HU49 (PR #27), HU50 etapa A (PR #30), HU59 (PR #32), HU51 con HU52 y HU53 parciales (PR #34) **HU54 a HU56 con el cierre de HU52 y HU53 (PR #36, `6590cee`)** y la corrección de envíos simultáneos (PR #38, `085a39f`, `etapa19` ejecutada). HU45 no queda completa: ver sección 3.1. **HU50 parcial** (falta la programación automática). **HU57 y HU58, con el PDF de la factura, en curso** en `feat/HU57-58-facturas-deuda-app`. |
 
 ### Fechas que no se mueven
 - **09/11/2026 – Cierre de desarrollo:** integración, pruebas integrales y despliegue final de la PWA (según el plan).
@@ -119,7 +119,7 @@ Reglas para Claude Code:
 
 ## 5. Base de datos y backend
 
-- **Migraciones:** scripts `supabase/sql/etapaN_*.sql`, que **el equipo ejecuta a mano** en Supabase → SQL Editor, en orden. La próxima es **`etapa20_…`**. Antes de `etapa17` se corre `verificaciones/relevamiento_cuotas.sql` (la tabla `cuotas` no se crea en el repo); antes de `etapa18`, `verificaciones/relevamiento_etapa18.sql`. `etapa19` es una corrección de `etapa18` (no hace falta volver a ejecutar `etapa18`).
+- **Migraciones:** scripts `supabase/sql/etapaN_*.sql`, que **el equipo ejecuta a mano** en Supabase → SQL Editor, en orden. La próxima es **`etapa21_…`**. Antes de `etapa17` se corre `verificaciones/relevamiento_cuotas.sql` (la tabla `cuotas` no se crea en el repo); antes de `etapa18`, `verificaciones/relevamiento_etapa18.sql`. `etapa19` es una corrección de `etapa18` (no hace falta volver a ejecutar `etapa18`). `etapa20` agrega `fn_datos_factura` (PDF de la factura).
   - Cada script debe ser **idempotente** (`if not exists`, `create or replace`) e incluir al final una **consulta de verificación**.
   - Documentar cada script nuevo en `supabase/sql/README.md`.
   - **Claude Code no ejecuta SQL contra la base de producción**: escribe el script y el equipo lo corre.
@@ -189,9 +189,9 @@ Fuente principal: **[`docs/plan-app-movil.md`](docs/plan-app-movil.md)**, el ext
 Cada paso es un PR (o pocos). Priorizar que el flujo **"consultar cuota → pagar → cargar comprobante → aprobar"** funcione de punta a punta para el testing.
 1. ✅ **Base:** Singleton del cliente de Supabase + `vite-plugin-pwa` + layout móvil y rutas `/app` (PR #15 y #18).
 2. **HU41–HU45:** ✅ HU41, HU42 y parte de HU45 (PR #19); ✅ HU43 y HU44 (PR #24). HU45 no queda completa (sección 3.1).
-3. **etapa16 en adelante (SQL), en scripts separados por bloque:** ✅ valores (`etapa16`); facturas, ítems y corrección de `'Efectivo'` (`etapa17`, HU50 etapa A); comprobantes y bucket privado (`etapa18`, HU54 a HU56, ejecutada por el equipo el 09/11); corrección de envíos simultáneos (`etapa19`, sin ejecutar todavía); faltan envíos.
+3. **etapa16 en adelante (SQL), en scripts separados por bloque:** ✅ valores (`etapa16`); facturas, ítems y corrección de `'Efectivo'` (`etapa17`, HU50 etapa A); comprobantes y bucket privado (`etapa18`, HU54 a HU56, ejecutada por el equipo el 09/11); corrección de envíos simultáneos (`etapa19`, ejecutada el 09/11); datos de la factura para su PDF (`etapa20`, sin ejecutar todavía); faltan envíos.
 4. ✅ **HU46–HU49:** valores en `gestion/GestionValores.tsx`, para Admin y Directivo (PR #27).
-5. **HU50:** facturación, **parcial**. Etapa A: `fn_generar_facturas` (invocable a mano o desde la sección Facturación), único generador de cuotas y facturas; la cuota del período es el ítem Cuota de su factura; el saldo se lee de `v_facturas_saldo` y `v_factura_items_saldo` (contrato para HU51 a HU56). Etapa B, pendiente: último día hábil con feriados, pg_cron y PDF bajo demanda reutilizable por HU60. Pendiente de definir: el cobro de las inscripciones dadas de alta después de emitir la factura (sección 11).
+5. **HU50:** facturación, **parcial**. Etapa A: `fn_generar_facturas` (invocable a mano o desde la sección Facturación), único generador de cuotas y facturas; la cuota del período es el ítem Cuota de su factura; el saldo se lee de `v_facturas_saldo` y `v_factura_items_saldo` (contrato para HU51 a HU56). PDF de la factura bajo demanda, hecho con HU57 (`etapa20` y acción `factura` de la Edge Function `pagos`, reutilizable por HU60). Pendiente: último día hábil con feriados y pg_cron. Pendiente de definir: el cobro de las inscripciones dadas de alta después de emitir la factura (sección 11).
 6. **HU51–HU53 y HU59:** consultas del padre/alumno en la app. ✅ HU59 (PR #32: `ServicioAlumnosApp`, selector de alumno e inscripciones de solo lectura). HU51 a HU53 en `feat/HU51-53-cuotas-pagos-app`: `ServicioCuotas` y `ServicioPagos` (solo Padre y alumnos de la sesión), lógica en `app/reglasCuentaAlumno.ts`.
    - HU51: facturas con saldo desde las vistas de `etapa17` y, aparte, las cuotas heredadas sin factura (no vinculadas por `id_cuota`).
    - HU52 parcial hasta HU56: cuotas pagadas con la fecha de pago registrada ("Sin fecha registrada" si falta); no hay fecha de aprobación ni comprobante.
@@ -199,13 +199,17 @@ Cada paso es un PR (o pocos). Priorizar que el flujo **"consultar cuota → paga
    - Neto 0 en "Sin cargo", aparte; "Cubierta por beca" solo si el dato lo respalda.
    - Recorrido manual aprobado por el equipo (08/11), salvo la beca del 100 %, que no se probó a mano por falta de un caso. Android, pendiente.
 7. ✅ **HU54 → HU55 → HU56:** integradas por el PR #36 (`6590cee`, 09/11). El equipo ejecutó el relevamiento, `etapa18` y `pruebas_etapa18` (16 de 16), desplegó la Edge Function `pagos`, aprobó el recorrido con Supabase real (bitácora 29) y la volvió a publicar después de las correcciones de Codacy (bitácora 31 a 33; cuatro falsos positivos marcados a mano). Pendientes: Android y la beca del 100 %.
-   - **Corrección en curso** (`fix/comprobantes-envios-simultaneos`, `etapa19`): dos envíos simultáneos con la misma clave podían devolver `PAG_ITEM_NO_DISPONIBLE` al gemelo; ahora devuelven el mismo comprobante (bitácora 34).
+   - ✅ **Corrección de envíos simultáneos** (PR #38, `etapa19`, bitácora 34 y 35): dos envíos simultáneos con la misma clave devuelven el mismo comprobante. `etapa19` ejecutada por el equipo; el recorrido manual de esta corrección no se hizo.
    - Datos (`etapa18`): `pagos` reutilizada como comprobante + `pago_items`; estados `En revision` / `Aprobado` / `Rechazado`; clave y huella por envío; bloqueos factura → pago → cuotas.
    - Edge Function `pagos`: verifica la sesión con `auth.getUser`; sube a una ruta propia sin upsert; revisión; comprobante de pago en PDF con datos históricos.
    - App: pagar con transferencia desde cada factura (`PagarFactura`, intento guardado por cuenta y factura), estados en Cuotas y Pagos, actualización en vivo (Realtime).
    - Web: sección **Comprobantes** para Admin y Directivo.
    - HU52 y HU53 se cierran con este bloque (fecha de aprobación, comprobante de pago y estados reales; los pagos administrativos históricos siguen identificados como tales). Sus criterios quedaron verificados en el recorrido e integrados con el PR #36; las Issues #33 y #35 las cierra el equipo. La beca del 100 % sigue sin un caso manual.
-8. **HU57 y HU58:** facturas por período y deuda por ítem.
+8. **HU57 y HU58:** en `feat/HU57-58-facturas-deuda-app`, sin ejecutar `etapa20` ni publicar `pagos` todavía.
+   - Sección **Facturas** de la app (solo Padre): pestañas "Por período" (HU57) y "Deuda por ítem" (HU58), con el selector de hijo, descarte de respuestas atrasadas y Realtime.
+   - HU57: filtro por **fecha de emisión**, incluidos los dos días; "desde" no puede ser posterior a "hasta". Cada factura muestra conceptos, importes, estados, todos sus comprobantes y los PDF (factura, archivo enviado y comprobante de pago).
+   - HU58: por concepto (cuota, cada deporte, cada recorrido y comedor) y mes, con su saldo; el total es la suma de los pendientes (En revisión sigue en el total); cuotas heredadas sin duplicar y Sin cargo fuera de la deuda.
+   - Lógica en `app/reglasFacturasDeuda.ts`; servicios `ServicioCuotas.facturas` / `deudaPorItem` y `ServicioPagos.urlFactura`.
 9. **HU60 y HU61:** correos programados, reutilizando `enviar-notificacion` / Resend. Probar con **fechas simuladas** (parámetro de fecha) y `EMAIL_ALLOWLIST`.
 10. **HU62–HU66:** listados de pagos en la web.
 
