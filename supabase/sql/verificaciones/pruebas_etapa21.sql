@@ -17,7 +17,9 @@
 --
 -- Necesita: 3 alumnos activos, un usuario Padre activo y un usuario
 -- Admin o Directivo activo (existentes; no se crean usuarios). Usa los
--- periodos de 2099 y 2100 con sus propios valores.
+-- periodos de 2099 y 2100 con sus propios valores. El Padre elegido puede
+-- tener otros hijos y puede haber otras familias: los controles calculan
+-- lo esperado a partir de los datos (no suponen cuantos hijos hay).
 -- ============================================================
 
 do $prueba$
@@ -43,6 +45,10 @@ declare
   v_clave uuid;
   v_clave_txt text;
   v_estado text;
+  v_esperado jsonb;
+  v_rev_antes numeric;
+  v_saldo_item numeric;
+  v_obtenido jsonb;
   m       int;
 begin
   -- ---------- Ayudas (temporales: se deshacen al final) ----------
@@ -165,18 +171,48 @@ begin
   v_controles := v_controles + 1;
 
   -- ---------- S4: composicion mensual por hijo (HU60) ----------
+  -- El Padre elegido puede tener OTROS hijos ademas de a1 y a2, y hay otras
+  -- familias: lo esperado se calcula de las tablas (todas las facturas del
+  -- periodo cuyos alumnos tienen hoy a ese padre), con sus conceptos e
+  -- importes exactos, y se compara con lo que arma fn_avisos_mensual.
   v_res := public.fn_avisos_mensual(2099, 2);
   select x into v_padre_json from jsonb_array_elements(v_res) x
    where x ->> 'id_usuario_padre' = v_padre::text;
-  perform pg_temp.verificar(v_padre_json is not null
-    and jsonb_array_length(v_padre_json -> 'hijos') = 2
+  select jsonb_agg(jsonb_build_object(
+           'id_factura', f.id_factura, 'total', f.total,
+           'items', (select jsonb_agg(jsonb_build_object('descripcion', fi.descripcion, 'neto', fi.neto)
+                                      order by fi.id_item)
+                       from factura_items fi where fi.id_factura = f.id_factura))
+         order by f.id_factura)
+    into v_esperado
+    from facturas f join alumnos a on a.id_alumno = f.id_alumno
+   where f.anio = 2099 and f.mes = 2 and a.id_usuario_padre = v_padre;
+  select jsonb_agg(jsonb_build_object(
+           'id_factura', (h ->> 'id_factura')::bigint, 'total', h -> 'total', 'items', h -> 'items')
+         order by (h ->> 'id_factura')::bigint)
+    into v_obtenido
+    from jsonb_array_elements(v_padre_json -> 'hijos') h;
+  perform pg_temp.verificar(v_padre_json is not null and v_obtenido = v_esperado, 'S4',
+    'las facturas, conceptos e importes del padre no coinciden. Esperado: ' || coalesce(v_esperado::text, 'nada')
+    || ' Obtenido: ' || coalesce(v_obtenido::text, 'nada'));
+  -- a1 y a2 estan entre esos hijos, y el total es la suma exacta de sus facturas
+  perform pg_temp.verificar(
+    (select count(*) from jsonb_array_elements(v_esperado) e
+      where (e ->> 'id_factura')::bigint in
+            (select id_factura from facturas where anio = 2099 and mes = 2 and id_alumno in (a1, a2))) = 2
     and (v_padre_json ->> 'total')::numeric
-        = (select sum(total) from facturas where anio = 2099 and mes = 2 and id_alumno in (a1, a2))
-    and not exists (select 1 from jsonb_array_elements(v_res) x
-                     where exists (select 1 from jsonb_array_elements(x -> 'hijos') h
-                                    where (h ->> 'id_factura')::bigint in
-                                      (select id_factura from facturas where anio = 2099 and mes = 2 and id_alumno = a3))),
-    'S4', coalesce(v_padre_json::text, 'el padre no figura'));
+        = (select sum((e ->> 'total')::numeric) from jsonb_array_elements(v_esperado) e), 'S4',
+    'faltan a1 o a2, o el total no es la suma de las facturas del padre: ' || v_padre_json::text);
+  -- Ajenos: cada familia lista solo facturas de sus hijos actuales, y a3
+  -- (sin padre) no aparece en ninguna
+  perform pg_temp.verificar(not exists (
+      select 1 from jsonb_array_elements(v_res) x, jsonb_array_elements(x -> 'hijos') h
+        join facturas f on f.id_factura = (h ->> 'id_factura')::bigint
+        join alumnos al on al.id_alumno = f.id_alumno
+       where al.id_usuario_padre is distinct from (x ->> 'id_usuario_padre')::uuid
+          or f.id_alumno = a3
+          or f.anio <> 2099 or f.mes <> 2), 'S4',
+    'una familia incluye una factura que no es de sus hijos o del periodo');
   v_controles := v_controles + 1;
 
   -- ---------- S5: deuda del dia 20 (HU61) ----------
@@ -195,11 +231,16 @@ begin
                      where (i ->> 'saldo')::numeric <= 0), 'S5',
     'el padre con deuda tiene que figurar, sin renglones sin cargo: ' || coalesce(v_padre_json::text, 'no figura'));
 
-  -- Un comprobante En revision no acredita: sigue en la deuda, marcado
+  -- Un comprobante En revision no acredita: el total no baja y lo en
+  -- revision sube exactamente el saldo de ese item (comparado con lo que
+  -- el padre ya tenia: puede tener otros hijos y otras deudas)
+  v_total := (v_padre_json ->> 'total')::numeric;
+  v_rev_antes := (v_padre_json ->> 'en_revision')::numeric;
   select f.id_factura, array_agg(v.id_item order by v.id_item) as items into v_fac
     from facturas f join v_factura_items_saldo v on v.id_factura = f.id_factura
    where f.anio = 2099 and f.mes = 2 and f.id_alumno = a1 and v.saldo > 0
    group by f.id_factura;
+  select saldo into v_saldo_item from v_factura_items_saldo where id_item = v_fac.items[1];
   v_clave := gen_random_uuid();
   v_res2 := public.fn_registrar_comprobante(v_padre, v_clave, v_fac.id_factura,
               array[v_fac.items[1]], 'h-s5',
@@ -207,21 +248,24 @@ begin
   v_res := public.fn_avisos_deuda(date '2099-02-20');
   select x into v_padre_json from jsonb_array_elements(v_res) x
    where x ->> 'id_usuario_padre' = v_padre::text;
-  perform pg_temp.verificar((v_padre_json ->> 'en_revision')::numeric > 0, 'S5',
-    'el comprobante en revision tiene que seguir como deuda: ' || coalesce(v_res2::text, ''));
-  -- Al aprobarlo baja la deuda (pago parcial)
-  v_total := (v_padre_json ->> 'total')::numeric;
+  perform pg_temp.verificar((v_padre_json ->> 'total')::numeric = v_total
+    and (v_padre_json ->> 'en_revision')::numeric = v_rev_antes + v_saldo_item, 'S5',
+    format('el comprobante en revision tiene que seguir como deuda: total %s -> %s, en revision %s -> %s (item %s)',
+           v_total, v_padre_json ->> 'total', v_rev_antes, v_padre_json ->> 'en_revision', v_saldo_item));
+  -- Al aprobarlo baja la deuda exactamente ese saldo (pago parcial)
   perform public.fn_revisar_comprobante(v_admin, (v_res2 ->> 'id_pago')::int, true, null);
   v_res := public.fn_avisos_deuda(date '2099-02-20');
   select x into v_padre_json from jsonb_array_elements(v_res) x
    where x ->> 'id_usuario_padre' = v_padre::text;
-  perform pg_temp.verificar(v_padre_json is null or (v_padre_json ->> 'total')::numeric < v_total, 'S5',
-    'aprobar tiene que bajar la deuda');
-  -- Pagar todo lo pendiente de los hijos: el padre ya no recibe el aviso
+  perform pg_temp.verificar(coalesce((v_padre_json ->> 'total')::numeric, 0) = v_total - v_saldo_item, 'S5',
+    format('aprobar tiene que bajar la deuda en %s: %s -> %s', v_saldo_item, v_total, v_padre_json ->> 'total'));
+  -- Pagar todo lo pendiente de 2099 de TODOS los hijos actuales del padre
+  -- (a1, a2 y los que ya tuviera): no le queda ningun renglon de 2099
   for v_fac in
     select f.id_factura, array_agg(v.id_item order by v.id_item) as items
       from facturas f join v_factura_items_saldo v on v.id_factura = f.id_factura
-     where f.id_alumno in (a1, a2) and f.anio = 2099 and v.saldo > 0 and v.estado_pago = 'Pendiente'
+     where f.id_alumno in (select id_alumno from alumnos where id_usuario_padre = v_padre)
+       and f.anio = 2099 and v.saldo > 0 and v.estado_pago = 'Pendiente'
        and f.fecha_vencimiento <= date '2099-02-20'
      group by f.id_factura
   loop
@@ -236,7 +280,7 @@ begin
    where x ->> 'id_usuario_padre' = v_padre::text
      and exists (select 1 from jsonb_array_elements(x -> 'items') i
                   where i ->> 'factura' in (select 'F-' || lpad(id_factura::text, 6, '0') from facturas
-                                             where anio = 2099 and id_alumno in (a1, a2)));
+                                             where anio = 2099));
   perform pg_temp.verificar(v_padre_json is null, 'S5',
     'sin deuda de 2099 el padre no tiene que tener renglones de 2099: ' || coalesce(v_padre_json::text, ''));
   v_controles := v_controles + 1;

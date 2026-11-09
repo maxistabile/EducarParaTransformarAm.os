@@ -312,9 +312,19 @@ select * from cron.job_run_details where command like '%fn_avisos_disparar%'
  order by start_time desc limit 20;
 ```
 
+*Informado por el equipo:* `etapa21` aplicada en Supabase. La primera
+corrida de `pruebas_etapa21` falló en S4 por un error **de la prueba**, no
+de la función. La prueba suponía que el Padre elegido tenía solo los dos hijos
+que le asigna, pero en la base real ya tenía otros, y `fn_avisos_mensual` los
+incluye correctamente. La prueba se corrigió: calcula lo esperado a partir de
+los datos. No hay que volver a ejecutar `etapa21`; solo
+`verificaciones/pruebas_etapa21.sql`, **pendiente de que el equipo informe el
+resultado**.
+
 *Verificado por la IA el 09/11 (no en Supabase):*
 - **PGlite:** `etapa21` dos veces y `pruebas_etapa21` 10 de 10, con S6b sobre la
-  incertidumbre conservada; `etapa22` dos veces. Siguen bien
+  incertidumbre conservada; `etapa22` dos veces. Pasa con los datos base y con
+  un Padre que ya tiene otro hijo y otra familia presente. Siguen bien
   `pruebas_etapa17` (12), `pruebas_etapa18` (16) y `pruebas_etapa20` (7).
 - **Concurrencia real** (PostgreSQL 17.6 local, sesiones coordinadas con
   `pg_locks`): misma reserva, reintento de un Fallido y facturación programada
