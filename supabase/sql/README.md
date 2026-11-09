@@ -22,7 +22,8 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa18_comprobantes.sql` | TP Met. II · Parte 3 · RF12.4–RF12.6 (HU54–HU56) | Reutiliza `pagos` como comprobante de transferencia (+ tabla `pago_items`), bucket privado `pagos`, funciones solo para `service_role` (las usa la Edge Function `pagos`), protecciones, control en `fn_controlar_cuota`, vistas de saldo con "En revision" y `pagos` en Realtime. Antes: `verificaciones/relevamiento_etapa18.sql` |
 | `etapa19_validar_solicitud_concurrente.sql` | TP Met. II · Parte 3 · corrección de HU54 | `fn_validar_solicitud`: dos envíos simultáneos con la misma clave devuelven el mismo comprobante (antes, el gemelo podía recibir `PAG_ITEM_NO_DISPONIBLE`). Requiere `etapa18`; no hace falta volver a ejecutarla |
 | `etapa20_factura_pdf.sql` | TP Met. II · Parte 3 · RF13.1 (HU57) y parte del PDF de RF11.5 (HU50) | `fn_datos_factura`: datos históricos de la factura emitida para generar su PDF (padre actual, Admin o Directivo; solo `service_role`). No escribe ni modifica facturas |
-| `etapa21_avisos_facturacion.sql` | TP Met. II · Parte 3 · RF11.5 (HU50 etapa B), RF14.1 y RF14.2 (HU60 y HU61), RNF9 | Calendario de `feriados`, último día hábil, facturación programada (reutiliza `fn_generar_facturas`), destinatarios y composición de los correos, registro de envíos `avisos_envios` con reserva atómica, y facturación manual solo para Admin y Directivo (`fn_generar_facturas_gestion`). No programa el cron |
+| `etapa21_avisos_facturacion.sql` | TP Met. II · Parte 3 · RF11.5 (HU50 etapa B), RF14.1 y RF14.2 (HU60 y HU61), RNF9 | Calendario de `feriados`, último día hábil, facturación programada (reutiliza `fn_generar_facturas`), destinatarios y composición de los correos, registro de envíos `avisos_envios` con reserva atómica, y el envoltorio `fn_generar_facturas_gestion` (solo Admin y Directivo). No programa el cron ni quita permisos |
+| `etapa22_cerrar_facturacion_directa.sql` | TP Met. II · Parte 3 · seguridad de HU50 | Quita a `anon` y `authenticated` el permiso de ejecutar `fn_generar_facturas`. Se corre **después** de integrar la web que usa el envoltorio |
 | `programar_avisos_cron.sql` / `desprogramar_avisos_cron.sql` | Activación manual del cron (HU50, HU60 y HU61) | Programan o quitan las tres corridas diarias con pg_cron y pg_net, usando secretos de Vault. Se corren a mano cuando el equipo decide activarlo |
 
 ## Etapa 17 — Facturación (HU50, etapa A)
@@ -236,35 +237,47 @@ HU58 aprobado.
 
 ## Etapa 21 — Facturación programada y correos (HU50 etapa B, HU60 y HU61)
 
-Orden (lo ejecuta el equipo; la IA no corre SQL en Supabase):
+Lo ejecuta el equipo; la IA no corre SQL en Supabase.
 
-1. **`etapa21_avisos_facturacion.sql`**. Requiere `etapa17`, `etapa18` y
-   `etapa20`. Al final muestra una tabla: todo `OK`, el cron como `INFO` (no
-   se programa acá) y RLS `INACTIVO`.
-   - **Importante:** quita a `authenticated` el permiso de ejecutar
-     `fn_generar_facturas` (antes cualquier sesión, incluso un padre, podía
-     emitir facturas por la API). La web pasa a usar
-     `fn_generar_facturas_gestion`, que exige Admin o Directivo: **integrar el
-     PR enseguida después de ejecutar esta etapa**, porque la versión anterior
-     de la web deja de poder generar facturas.
-2. **`verificaciones/pruebas_etapa21.sql`**: termina **siempre con un error a
-   propósito** y no deja datos. Si todo pasa:
-   `PRUEBAS_ETAPA21_OK|9 controles (S1 a S9)`. Necesita 3 alumnos activos, un
-   Padre y un Admin o Directivo activos. Conviene repetir también
-   `pruebas_etapa20` (cambió `fn_datos_factura` por dentro, con el mismo
-   resultado).
-3. Revisar el calendario: `select * from feriados order by fecha;`. Están los
-   feriados nacionales de 2026 y 2027 según la Ley 27.399 (con los traslados
-   del art. 6). **Los días no laborables con fines turísticos se fijan por
-   decreto cada año: cargarlos** con tipo `No laborable` antes de activar el
-   cron (ver el comentario en el script).
-4. Publicar las Edge Functions y probar en simulación
-   (`supabase/functions/README.md`).
-5. **Activar el cron** recién cuando el equipo lo decida:
-   `programar_avisos_cron.sql` (requisitos en su encabezado: pg_cron, pg_net y
-   dos secretos en Vault). Para apagarlo: `desprogramar_avisos_cron.sql`.
+**Secuencia de despliegue (única; el botón "Generar facturas" no se corta):**
+1. **Secrets** (Edge Functions → Secrets): crear `AVISOS_CLAVE` (32 caracteres o
+   más al azar, por ejemplo `openssl rand -hex 32`); dejar `EMAIL_ALLOWLIST` solo
+   con correos del equipo y `EMAILS_HABILITADOS` en `false`. Revisar que estén
+   `RESEND_API_KEY` y `EMAIL_FROM`.
+2. **Edge Functions:** volver a publicar `pagos` (Verify JWT activado; los flujos
+   de usuario no cambian) y crear `avisos` (Verify JWT **desactivado**). Todavía
+   no hacen nada nuevo: nadie llama a `avisos` y la acción interna de `pagos`
+   recién sirve con `etapa21`. No tocar `crear-usuario`.
+3. **SQL `etapa21_avisos_facturacion.sql`** y después
+   `verificaciones/pruebas_etapa21.sql` (→ `PRUEBAS_ETAPA21_OK|10 controles`) y
+   `verificaciones/pruebas_etapa20.sql` (→ 7 controles). La web publicada sigue
+   generando facturas: `fn_generar_facturas` todavía conserva su permiso.
+4. **Revisar el calendario:** `select * from feriados order by fecha;`. 2026 ya
+   está completo; en 2027, confirmar los trasladables con el calendario oficial y
+   cargar los no laborables con fines turísticos cuando se publiquen.
+5. **PR:** revisión e integración. Vercel publica la web que usa
+   `fn_generar_facturas_gestion` (ya existe desde el paso 3). Probar "Generar
+   facturas" con Admin o Directivo.
+6. **SQL `etapa22_cerrar_facturacion_directa.sql`:** quita a las sesiones el
+   permiso de ejecutar `fn_generar_facturas`. Tabla final: todo `OK`. Volver a
+   probar "Generar facturas" desde la web (sigue funcionando por el envoltorio).
+7. **Simulación** de `avisos` con curl (`supabase/functions/README.md`).
+8. **Prueba controlada** (opcional): `EMAILS_HABILITADOS=true`, allowlist del
+   equipo y `recuperar: true` con una fecha pasada.
+9. **Activar el cron** cuando el equipo lo decida: extensiones pg_cron y pg_net,
+   secretos `avisos_url` y `avisos_clave` en Vault, y
+   `programar_avisos_cron.sql`. Para apagarlo: `desprogramar_avisos_cron.sql`.
 
 Cómo funciona:
+- **Calendario:** fuentes Ley 27.399 y Resolución 164/2025 de la Jefatura de
+  Gabinete (B.O. 26/12/2025), que fija como no laborables con fines turísticos
+  de 2026 el 23/03, el 10/07 y el 07/12.
+  - **2026:** completo, según lo publicado.
+  - **2027, confirmado por la ley:** los feriados inamovibles, Carnaval, y
+    Jueves y Viernes Santo (Pascua 28/03/2027).
+  - **2027, sujeto a decisiones oficiales:** los trasladables, calculados con el
+    art. 6, se confirman con el calendario oficial; los no laborables con fines
+    turísticos todavía no están fijados.
 - **Día hábil:** no es sábado, domingo ni figura en `feriados`.
   `fn_ultimo_dia_habil(anio, mes)` va hacia atrás desde el último día del mes.
   La fecha de "hoy" se calcula en `America/Argentina/Buenos_Aires`.
@@ -284,8 +297,9 @@ Cómo funciona:
   corridas a la vez no envían dos veces. Estados:
   - **Enviado:** el proveedor lo aceptó.
   - **Fallido:** el proveedor lo rechazó; no se envió y se reintenta con clave nueva, hasta 3 veces.
-  - **Incierto:** respuesta ambigua; se reintenta solo con la **misma** clave y el mismo contenido dentro de las 23 h, y después queda para revisión.
+  - **Incierto:** respuesta ambigua; se reintenta solo con la **misma** clave, el mismo destinatario y el mismo contenido, dentro de las 23 h del primer intento con esa clave (no se reinicia). Después queda para revisión manual.
   - **Omitido:** no se llamó al proveedor.
+  - **Incertidumbre conservada (`posible_envio`):** si un intento **pudo** llegar al proveedor (respuesta ambigua o intento abandonado), un problema posterior no prueba que no se envió. Puede ser un envío desactivado, fuera de la allowlist, un error del PDF o un 429 u otro rechazo en el reintento. El registro sigue **Incierto**, con la misma clave, destinatario, contenido y límite de 23 h; el motivo queda como `posible_envio_previo/<lo que pasó>`. Los fallos iniciales, sin contacto previo con el proveedor, siguen siendo Fallido u Omitido y se reintentan con clave nueva.
 - **Seguridad:** las funciones de avisos solo las ejecuta `service_role`;
   `feriados` y `avisos_envios` no son accesibles para `anon` ni
   `authenticated` (la tabla guarda correos). RLS no cambia.
@@ -299,7 +313,8 @@ select * from cron.job_run_details where command like '%fn_avisos_disparar%'
 ```
 
 *Verificado por la IA el 09/11 (no en Supabase):*
-- **PGlite:** `etapa21` dos veces y `pruebas_etapa21` 9 de 9. Siguen bien
+- **PGlite:** `etapa21` dos veces y `pruebas_etapa21` 10 de 10, con S6b sobre la
+  incertidumbre conservada; `etapa22` dos veces. Siguen bien
   `pruebas_etapa17` (12), `pruebas_etapa18` (16) y `pruebas_etapa20` (7).
 - **Concurrencia real** (PostgreSQL 17.6 local, sesiones coordinadas con
   `pg_locks`): misma reserva, reintento de un Fallido y facturación programada

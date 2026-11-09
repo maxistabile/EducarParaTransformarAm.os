@@ -184,14 +184,28 @@ definirlos en Supabase**.
 
 ## Despliegue desde el dashboard
 
-1. Ejecutar antes `etapa21` (`supabase/sql/README.md`).
-2. Volver a publicar `pagos` con `supabase/functions/pagos/index.ts` (Verify
+Va en el paso 2 de la secuencia única de `supabase/sql/README.md` (Etapa 21):
+después de los secrets y **antes** de los cambios de SQL.
+
+1. Volver a publicar `pagos` con `supabase/functions/pagos/index.ts` (Verify
    JWT **activado**).
-3. **Edge Functions → Deploy a new function → Via Editor**, nombre `avisos`,
+2. **Edge Functions → Deploy a new function → Via Editor**, nombre `avisos`,
    pegar todo `supabase/functions/avisos/index.ts` y desplegar.
-4. En la configuración de `avisos`, **desactivar Verify JWT**: la llama pg_cron
+3. En la configuración de `avisos`, **desactivar Verify JWT**: la llama pg_cron
    y la protege `AVISOS_CLAVE` (sin la clave responde 401).
-5. No tocar `crear-usuario`.
+4. No tocar `crear-usuario`.
+
+Estados de cada envío (tabla `avisos_envios`):
+- **Enviado.**
+- **Fallido:** el proveedor rechazó; se reintenta con clave nueva.
+- **Incierto:** puede haberse enviado. Se reintenta solo con la misma clave,
+  destinatario y contenido dentro de las 23 h del primer intento; después,
+  revisión manual.
+- **Omitido:** no se llamó al proveedor.
+
+Si un intento **pudo** llegar al proveedor, un problema posterior
+(desactivado, allowlist, PDF, 429 u otro rechazo) no lo descarta: sigue
+Incierto ("incierto_conservado" en la respuesta).
 
 ## Probar sin enviar ni escribir (simulación)
 

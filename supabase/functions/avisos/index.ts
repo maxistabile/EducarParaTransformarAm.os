@@ -27,6 +27,10 @@
 //     deduplica 24 h); después queda para revisión manual.
 //   - Omitido: no se llamó a Resend (envío desactivado, sin allowlist,
 //     fuera de la allowlist o sin correo). Se reevalúa en la próxima.
+//   Si un intento anterior PUDO llegar a Resend, un problema posterior
+//   (desactivado, allowlist, PDF o un rechazo) no prueba que no se envió:
+//   la base lo deja Incierto, con la misma clave, destinatario, contenido
+//   y límite de 23 h (cuenta como "incierto_conservado").
 //
 // Cuerpo opcional (JSON):
 //   { simular: true }            arma todo y NO escribe ni envía (sin
@@ -238,9 +242,18 @@ export function clasificar(status: number | null, id: unknown): { estado: 'Envia
   return { estado: 'Incierto', motivo: `proveedor_${status}` }
 }
 
-async function registrar(ctx: Contexto, id: number, estado: string, idProveedor: string | null, motivo: string | null) {
-  await rpc(ctx.db, 'fn_aviso_registrar', { p_id_envio: id, p_estado: estado, p_id_proveedor: idProveedor, p_motivo: motivo })
+/**
+ * Guarda el resultado y devuelve el estado que quedó. Si el envío ya pudo
+ * llegar al proveedor en un intento anterior, la base conserva Incierto
+ * aunque ahora se informe Fallido u Omitido (no se descarta aquel envío).
+ */
+async function registrar(ctx: Contexto, id: number, estado: string, idProveedor: string | null, motivo: string | null): Promise<string> {
+  return await rpc<string>(ctx.db, 'fn_aviso_registrar', { p_id_envio: id, p_estado: estado, p_id_proveedor: idProveedor, p_motivo: motivo })
 }
+
+/** Conteo de la corrida según el estado que quedó en la base. */
+const claveConteo = (pedido: string, quedo: string, motivo: string | null) =>
+  quedo !== pedido ? 'incierto_conservado' : pedido === 'Omitido' ? `omitido_${motivo}` : pedido.toLowerCase()
 
 async function procesar(
   ctx: Contexto, tipo: Tipo, anio: number, mes: number,
@@ -270,7 +283,9 @@ async function procesar(
   // Se envía lo reservado: en un reintento incierto, el mismo correo y los mismos datos
   const para = r.email ?? null
   const datos = r.detalle ?? detalle
-  const omitir = (motivo: string) => registrar(ctx, r.id_envio, 'Omitido', null, motivo).then(() => sumar(conteo, `omitido_${motivo}`))
+  const omitir = (motivo: string) => registrar(ctx, r.id_envio, 'Omitido', null, motivo).then((quedo) => {
+    sumar(conteo, claveConteo('Omitido', quedo, motivo))
+  })
   if (!correoUtil(para)) return omitir('sin_correo')
   if (!ctx.habilitado) return omitir('envio_desactivado')
   if (ctx.allowlist.length === 0) return omitir('sin_allowlist')
@@ -309,16 +324,16 @@ async function procesar(
       clearTimeout(corte)
     }
     const res = clasificar(status, id)
-    await registrar(ctx, r.id_envio, res.estado, typeof id === 'string' ? id : null, res.motivo)
-    sumar(conteo, res.estado.toLowerCase())
+    const quedo = await registrar(ctx, r.id_envio, res.estado, typeof id === 'string' ? id : null, res.motivo)
+    sumar(conteo, claveConteo(res.estado, quedo, res.motivo))
   } catch (e: unknown) {
     // Error antes de llamar a Resend (PDF, armado): no se envió nada
     const codigo = e instanceof ErrorBase ? e.codigo : 'AVI_INTERNO'
     console.error('[avisos] error al preparar o registrar:', { tipo, codigo })
     if (!llamado) {
       try {
-        await registrar(ctx, r.id_envio, 'Fallido', null, codigo.toLowerCase())
-        sumar(conteo, 'fallido')
+        const quedo = await registrar(ctx, r.id_envio, 'Fallido', null, codigo.toLowerCase())
+        sumar(conteo, claveConteo('Fallido', quedo, codigo.toLowerCase()))
       } catch (error) {
         // Queda Enviando: la próxima corrida lo retoma (en_curso vence a los 15 min)
         console.error('[avisos] no se pudo registrar el fallo:', { tipo, codigo: error instanceof ErrorBase ? error.codigo : 'AVI_INTERNO' })

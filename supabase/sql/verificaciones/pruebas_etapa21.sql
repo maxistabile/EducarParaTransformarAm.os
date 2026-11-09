@@ -41,6 +41,8 @@ declare
   v_env   bigint;
   v_total numeric;
   v_clave uuid;
+  v_clave_txt text;
+  v_estado text;
   m       int;
 begin
   -- ---------- Ayudas (temporales: se deshacen al final) ----------
@@ -114,6 +116,10 @@ begin
   perform pg_temp.verificar(not public.fn_es_dia_habil(date '2026-11-23')
     and not public.fn_es_dia_habil(date '2026-11-28')
     and public.fn_es_dia_habil(date '2026-11-30'), 'S1', 'feriado, sabado y lunes habil');
+  -- No laborables con fines turisticos de 2026 (Resolucion 164/2025)
+  perform pg_temp.verificar(not public.fn_es_dia_habil(date '2026-03-23')
+    and not public.fn_es_dia_habil(date '2026-07-10')
+    and not public.fn_es_dia_habil(date '2026-12-07'), 'S1', 'no laborables de 2026 (Res. 164/2025)');
   for m in 1..12 loop
     v_dia := public.fn_ultimo_dia_habil(2099, m);
     perform pg_temp.verificar(public.fn_es_dia_habil(v_dia)
@@ -273,6 +279,59 @@ begin
     and (select estado from avisos_envios where id_envio = v_env) = 'Incierto', 'S6', v_res::text);
   v_controles := v_controles + 1;
 
+  -- ---------- S6b: un intento que pudo llegar al proveedor conserva su incertidumbre ----------
+  -- Respuesta perdida -> envio deshabilitado (Omitido): queda Incierto, misma clave
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 5, v_padre, 'padre@prueba.test', '{"c":1}');
+  v_env := (v_res ->> 'id_envio')::bigint;
+  v_clave_txt := v_res ->> 'clave';
+  perform public.fn_aviso_registrar(v_env, 'Incierto', null, 'sin_respuesta');
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 5, v_padre, 'otro@prueba.test', '{"c":2}');
+  perform pg_temp.verificar((v_res ->> 'reservado')::boolean and v_res ->> 'clave' = v_clave_txt
+    and v_res ->> 'email' = 'padre@prueba.test' and v_res -> 'detalle' = '{"c":1}', 'S6b', v_res::text);
+  -- (la llamada y la consulta van en sentencias separadas: cada sentencia ve su instantanea)
+  v_estado := public.fn_aviso_registrar(v_env, 'Omitido', null, 'envio_desactivado');
+  perform pg_temp.verificar(v_estado = 'Incierto'
+    and (select posible_envio and clave = v_clave_txt and motivo like 'posible_envio_previo/%'
+           from avisos_envios where id_envio = v_env), 'S6b',
+    'un Omitido despues de una respuesta perdida tiene que quedar Incierto: ' || coalesce(v_estado, ''));
+  -- ... habilitado otra vez: misma clave, mismo destinatario y mismo contenido
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 5, v_padre, 'otro@prueba.test', '{"c":3}');
+  perform pg_temp.verificar((v_res ->> 'reservado')::boolean and v_res ->> 'clave' = v_clave_txt
+    and v_res ->> 'email' = 'padre@prueba.test' and v_res -> 'detalle' = '{"c":1}', 'S6b', v_res::text);
+  -- ... error preparando el PDF (Fallido) o un 429 en el reintento: sigue Incierto, misma clave
+  perform pg_temp.verificar(public.fn_aviso_registrar(v_env, 'Fallido', null, 'avi_pdf') = 'Incierto', 'S6b',
+    'un error del PDF despues de una respuesta perdida tiene que quedar Incierto');
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 5, v_padre, 'otro@prueba.test', '{"c":4}');
+  v_estado := public.fn_aviso_registrar(v_env, 'Fallido', null, 'limite_429');
+  perform pg_temp.verificar(v_estado = 'Incierto'
+    and (select clave from avisos_envios where id_envio = v_env) = v_clave_txt, 'S6b',
+    'un 429 en el reintento no descarta el primer envio');
+  -- ... y la ventana NO se reinicia: sigue contando desde el primer intento
+  perform pg_temp.verificar((select primer_intento from avisos_envios where id_envio = v_env) = now(), 'S6b',
+    'primer_intento no tiene que cambiar en los reintentos');
+  update avisos_envios set primer_intento = now() - interval '24 hours' where id_envio = v_env;
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 5, v_padre, 'otro@prueba.test', '{"c":5}');
+  perform pg_temp.verificar(v_res ->> 'motivo' = 'incierto_revisar'
+    and (select estado = 'Incierto' and clave = v_clave_txt from avisos_envios where id_envio = v_env), 'S6b',
+    'vencida la ventana sin confirmar, queda para revision manual: ' || v_res::text);
+  -- Enviando abandonado (pudo haber llamado al proveedor): misma clave y luego Omitido -> Incierto
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 6, v_padre, 'padre@prueba.test', '{"e":1}');
+  v_env := (v_res ->> 'id_envio')::bigint;
+  v_clave_txt := v_res ->> 'clave';
+  update avisos_envios set ultimo_intento = now() - interval '20 minutes' where id_envio = v_env;
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 6, v_padre, 'otro@prueba.test', '{"e":2}');
+  perform pg_temp.verificar((v_res ->> 'reservado')::boolean and v_res ->> 'clave' = v_clave_txt
+    and (v_res ->> 'reintento_incierto')::boolean
+    and public.fn_aviso_registrar(v_env, 'Omitido', null, 'fuera_de_allowlist') = 'Incierto', 'S6b', v_res::text);
+  -- Un fallo inicial SIN contacto previo sigue igual: Omitido y luego clave nueva
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 7, v_padre, 'padre@prueba.test', '{"f":1}');
+  v_env := (v_res ->> 'id_envio')::bigint;
+  perform pg_temp.verificar(public.fn_aviso_registrar(v_env, 'Omitido', null, 'envio_desactivado') = 'Omitido', 'S6b',
+    'un Omitido sin contacto previo sigue Omitido');
+  v_res := public.fn_aviso_reservar('Deuda', 2099, 7, v_padre, 'padre@prueba.test', '{"f":2}');
+  perform pg_temp.verificar(v_res ->> 'clave' like '%-2' and v_res -> 'detalle' = '{"f":2}', 'S6b', v_res::text);
+  v_controles := v_controles + 1;
+
   -- ---------- S7: facturacion manual solo Admin o Directivo ----------
   perform pg_temp.sesion(v_padre);
   perform pg_temp.esperar_error('select public.fn_generar_facturas_gestion(2099, 4)', 'PAG_SIN_PERMISO', 'S7');
@@ -293,8 +352,7 @@ begin
 
   -- ---------- S9: permisos ----------
   perform pg_temp.verificar(
-    not has_function_privilege('authenticated', 'public.fn_generar_facturas(integer, integer, text)', 'execute')
-    and not has_function_privilege('authenticated', 'public.fn_facturacion_programada(date)', 'execute')
+    not has_function_privilege('authenticated', 'public.fn_facturacion_programada(date)', 'execute')
     and not has_function_privilege('authenticated', 'public.fn_avisos_deuda(date)', 'execute')
     and not has_function_privilege('authenticated', 'public.fn_aviso_reservar(text, integer, integer, uuid, text, jsonb)', 'execute')
     and not has_function_privilege('anon', 'public.fn_generar_facturas_gestion(integer, integer)', 'execute')
@@ -304,6 +362,6 @@ begin
     'S9', 'permisos distintos de los esperados');
   v_controles := v_controles + 1;
 
-  raise exception 'PRUEBAS_ETAPA21_OK|% controles (S1 a S9) - a proposito, para deshacer todo',
+  raise exception 'PRUEBAS_ETAPA21_OK|% controles (S1 a S9, con S6b) - a proposito, para deshacer todo',
     v_controles;
 end $prueba$;

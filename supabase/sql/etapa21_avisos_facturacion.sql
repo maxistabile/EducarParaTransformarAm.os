@@ -32,15 +32,23 @@
 --     Fallido (el proveedor rechazo: no se envio), Incierto (respuesta
 --     ambigua: puede haberse enviado) y Omitido (no se llamo al
 --     proveedor: envio desactivado, fuera de la allowlist o sin correo).
---     Un Incierto solo se reintenta con la MISMA clave de idempotencia
---     y dentro de las 23 horas (el proveedor deduplica 24 h); despues
---     queda para revision manual, sin reenviar a ciegas.
+--     Un Incierto solo se reintenta con la MISMA clave de idempotencia,
+--     el mismo destinatario y el mismo contenido, dentro de las 23 horas
+--     del primer intento con esa clave (el proveedor deduplica 24 h);
+--     despues queda para revision manual, sin reenviar a ciegas. Una vez
+--     que un intento PUDO llegar al proveedor (posible_envio), un
+--     problema posterior (envio desactivado, fuera de la allowlist, error
+--     del PDF o un rechazo del proveedor) no prueba que aquel no se
+--     envio: el registro sigue Incierto, con la misma clave y el mismo
+--     limite de tiempo.
 --   * Seguridad: las funciones de avisos solo las ejecuta service_role
 --     (la Edge Function "avisos", protegida con un secreto). La
 --     facturacion manual de la web pasa a fn_generar_facturas_gestion,
---     que exige Admin o Directivo; fn_generar_facturas deja de estar
---     disponible para cualquier sesion (antes un padre podia llamarla
---     por la API). RLS no cambia (CLAUDE.md 3.1).
+--     que exige Admin o Directivo. Quitarle a authenticated el permiso de
+--     ejecutar fn_generar_facturas (hoy cualquier sesion puede emitir
+--     facturas por la API) se hace en etapa22, DESPUES de integrar la web
+--     que usa el envoltorio, para no cortar el boton Generar facturas.
+--     RLS no cambia (CLAUDE.md 3.1).
 -- ============================================================
 
 
@@ -64,13 +72,20 @@ end $$;
 -- ------------------------------------------------------------
 -- 1) FERIADOS (calendario mantenible)
 -- ------------------------------------------------------------
--- Fuente: Ley 27.399 (feriados nacionales y dias no laborables; art. 6,
--- traslado de los feriados trasladables) y el calendario oficial que
--- publica el Ministerio del Interior en
--- https://www.argentina.gob.ar/interior/feriados-nacionales-<anio>.
--- Para mantenerlo: insertar o borrar filas. Los "dias no laborables con
--- fines turisticos" se fijan por decreto cada anio: cargarlos con tipo
--- 'No laborable' cuando se publiquen (ver el final de esta seccion).
+-- Fuentes:
+--   * Ley 27.399 (feriados nacionales y dias no laborables; art. 6,
+--     traslado de los feriados trasladables; art. 7, dias no laborables
+--     con fines turisticos).
+--   * Resolucion 164/2025 de la Jefatura de Gabinete de Ministros
+--     (B.O. 26/12/2025): dias no laborables con fines turisticos de 2026,
+--     https://www.argentina.gob.ar/normativa/nacional/resoluci%C3%B3n-164-2025-421799/texto
+-- 2026: calendario completo segun lo publicado.
+-- 2027: confirmados por la ley los inamovibles, Carnaval, Jueves y
+-- Viernes Santo (dependen de la Pascua, 28/03/2027). Los trasladables
+-- estan CALCULADOS con el art. 6 y hay que confirmarlos con el calendario
+-- oficial 2027. Los dias no laborables con fines turisticos de 2027
+-- todavia no estan fijados: cargarlos cuando se publiquen (ver el final
+-- de esta seccion). Para mantenerlo: insertar o borrar filas.
 create table if not exists feriados (
   fecha       date primary key,
   descripcion text not null,
@@ -82,6 +97,7 @@ insert into feriados (fecha, descripcion, tipo, fuente) values
   ('2026-01-01', 'Anio Nuevo', 'Feriado', 'Ley 27.399'),
   ('2026-02-16', 'Carnaval', 'Feriado', 'Ley 27.399'),
   ('2026-02-17', 'Carnaval', 'Feriado', 'Ley 27.399'),
+  ('2026-03-23', 'Dia no laborable con fines turisticos', 'No laborable', 'Resolucion 164/2025 (JGM)'),
   ('2026-03-24', 'Dia Nacional de la Memoria por la Verdad y la Justicia', 'Feriado', 'Ley 27.399'),
   ('2026-04-02', 'Dia del Veterano y de los Caidos en la Guerra de Malvinas (y Jueves Santo)', 'Feriado', 'Ley 27.399'),
   ('2026-04-03', 'Viernes Santo', 'Feriado', 'Ley 27.399'),
@@ -90,9 +106,11 @@ insert into feriados (fecha, descripcion, tipo, fuente) values
   ('2026-06-15', 'Paso a la Inmortalidad del Gral. Guemes (trasladado del 17/06)', 'Feriado', 'Ley 27.399, art. 6'),
   ('2026-06-20', 'Paso a la Inmortalidad del Gral. Belgrano', 'Feriado', 'Ley 27.399'),
   ('2026-07-09', 'Dia de la Independencia', 'Feriado', 'Ley 27.399'),
+  ('2026-07-10', 'Dia no laborable con fines turisticos', 'No laborable', 'Resolucion 164/2025 (JGM)'),
   ('2026-08-17', 'Paso a la Inmortalidad del Gral. San Martin', 'Feriado', 'Ley 27.399, art. 6'),
   ('2026-10-12', 'Dia del Respeto a la Diversidad Cultural', 'Feriado', 'Ley 27.399, art. 6'),
   ('2026-11-23', 'Dia de la Soberania Nacional (trasladado del 20/11)', 'Feriado', 'Ley 27.399, art. 6'),
+  ('2026-12-07', 'Dia no laborable con fines turisticos', 'No laborable', 'Resolucion 164/2025 (JGM)'),
   ('2026-12-08', 'Inmaculada Concepcion de Maria', 'Feriado', 'Ley 27.399'),
   ('2026-12-25', 'Navidad', 'Feriado', 'Ley 27.399'),
   ('2027-01-01', 'Anio Nuevo', 'Feriado', 'Ley 27.399'),
@@ -105,20 +123,19 @@ insert into feriados (fecha, descripcion, tipo, fuente) values
   ('2027-05-01', 'Dia del Trabajador', 'Feriado', 'Ley 27.399'),
   ('2027-05-25', 'Dia de la Revolucion de Mayo', 'Feriado', 'Ley 27.399'),
   ('2027-06-20', 'Paso a la Inmortalidad del Gral. Belgrano', 'Feriado', 'Ley 27.399'),
-  ('2027-06-21', 'Paso a la Inmortalidad del Gral. Guemes (trasladado del 17/06)', 'Feriado', 'Ley 27.399, art. 6'),
+  ('2027-06-21', 'Paso a la Inmortalidad del Gral. Guemes (trasladado del 17/06)', 'Feriado', 'Ley 27.399, art. 6 (calculado; confirmar con el calendario oficial 2027)'),
   ('2027-07-09', 'Dia de la Independencia', 'Feriado', 'Ley 27.399'),
-  ('2027-08-16', 'Paso a la Inmortalidad del Gral. San Martin (trasladado del 17/08)', 'Feriado', 'Ley 27.399, art. 6'),
-  ('2027-10-11', 'Dia del Respeto a la Diversidad Cultural (trasladado del 12/10)', 'Feriado', 'Ley 27.399, art. 6'),
-  ('2027-11-20', 'Dia de la Soberania Nacional', 'Feriado', 'Ley 27.399, art. 6'),
+  ('2027-08-16', 'Paso a la Inmortalidad del Gral. San Martin (trasladado del 17/08)', 'Feriado', 'Ley 27.399, art. 6 (calculado; confirmar con el calendario oficial 2027)'),
+  ('2027-10-11', 'Dia del Respeto a la Diversidad Cultural (trasladado del 12/10)', 'Feriado', 'Ley 27.399, art. 6 (calculado; confirmar con el calendario oficial 2027)'),
+  ('2027-11-20', 'Dia de la Soberania Nacional (sabado: no se traslada)', 'Feriado', 'Ley 27.399, art. 6 (calculado; confirmar con el calendario oficial 2027)'),
   ('2027-12-08', 'Inmaculada Concepcion de Maria', 'Feriado', 'Ley 27.399'),
   ('2027-12-25', 'Navidad', 'Feriado', 'Ley 27.399')
 on conflict (fecha) do nothing;
--- Dias no laborables con fines turisticos: se fijan por decreto cada
--- anio. Antes de activar el cron, revisar el calendario oficial y
--- cargarlos, por ejemplo:
+-- Dias no laborables con fines turisticos de 2027 (todavia no fijados):
+-- cuando se publiquen, cargarlos asi, con la norma como fuente:
 --   insert into feriados (fecha, descripcion, tipo, fuente)
 --   values ('AAAA-MM-DD', 'Dia no laborable con fines turisticos',
---           'No laborable', 'Decreto <numero>/<anio>')
+--           'No laborable', '<norma y numero>')
 --   on conflict (fecha) do nothing;
 
 
@@ -366,20 +383,26 @@ create table if not exists avisos_envios (
   motivo           text,
   primer_intento   timestamptz,
   ultimo_intento   timestamptz,
+  -- true desde que un intento PUDO llegar al proveedor (respuesta ambigua
+  -- o intento abandonado): ya no se cambia la clave ni el contenido
+  posible_envio    boolean not null default false,
   enviado_en       timestamptz,
   creado           timestamptz not null default now(),
   constraint uq_aviso_padre_periodo unique (tipo, anio, mes, id_usuario_padre)
 );
+alter table avisos_envios add column if not exists posible_envio boolean not null default false;
 
 -- Reserva un envio para este intento. Solo una ejecucion lo obtiene,
 -- aunque corran varias a la vez (fila bloqueada FOR UPDATE).
 --   reservado=false: ya_enviado | en_curso | incierto_revisar | sin_reintentos
 --   reservado=true:  clave (Idempotency-Key), email y detalle a enviar.
--- Un Incierto (o un Enviando abandonado) se reintenta con la MISMA clave
--- y el MISMO detalle, dentro de las 23 h del primer intento; despues
--- queda Incierto para revision manual. Fallido, Omitido y Pendiente no
--- llegaron al proveedor: se reintentan con una clave nueva y los datos
--- actuales (Fallido, hasta 3 intentos).
+-- Un intento que PUDO llegar al proveedor (Incierto, posible_envio o un
+-- Enviando abandonado) se reintenta con la MISMA clave, el MISMO
+-- destinatario y el MISMO detalle, dentro de las 23 h del primer intento
+-- con esa clave (no se reinicia); despues queda Incierto para revision
+-- manual. Fallido, Omitido y Pendiente sin posible_envio no llegaron al
+-- proveedor: se reintentan con una clave nueva y los datos actuales
+-- (Fallido, hasta 3 intentos).
 create or replace function public.fn_aviso_reservar(
   p_tipo text, p_anio integer, p_mes integer, p_padre uuid, p_email text, p_detalle jsonb)
 returns jsonb language plpgsql security definer
@@ -403,15 +426,17 @@ begin
     return jsonb_build_object('reservado', false, 'motivo', 'en_curso', 'id_envio', v.id_envio);
   end if;
 
-  if v.estado in ('Incierto', 'Enviando') then
+  if v.posible_envio or v.estado in ('Incierto', 'Enviando') then
     if v.primer_intento is null or v.primer_intento < now() - interval '23 hours' then
-      update avisos_envios set estado = 'Incierto', motivo = coalesce(motivo, 'sin_confirmacion')
+      update avisos_envios set estado = 'Incierto', posible_envio = true,
+             motivo = coalesce(motivo, 'sin_confirmacion')
        where id_envio = v.id_envio;
       return jsonb_build_object('reservado', false, 'motivo', 'incierto_revisar', 'id_envio', v.id_envio);
     end if;
-    -- Reintento seguro: misma clave y mismo detalle (el proveedor deduplica)
+    -- Reintento seguro: misma clave, destinatario y detalle; el limite de
+    -- tiempo sigue contando desde el primer intento (el proveedor deduplica)
     update avisos_envios
-       set estado = 'Enviando', intentos = intentos + 1, ultimo_intento = now()
+       set estado = 'Enviando', posible_envio = true, intentos = intentos + 1, ultimo_intento = now()
      where id_envio = v.id_envio;
     return jsonb_build_object('reservado', true, 'id_envio', v.id_envio, 'clave', v.clave,
                               'email', v.email, 'detalle', v.detalle, 'reintento_incierto', true);
@@ -433,7 +458,10 @@ begin
                             'email', v.email, 'detalle', v.detalle, 'reintento_incierto', false);
 end $$;
 
--- Resultado de un intento reservado (solo desde Enviando).
+-- Resultado de un intento reservado (solo desde Enviando). Devuelve el
+-- estado que quedo. Si el envio PUDO haber llegado antes (posible_envio),
+-- un Fallido u Omitido posterior no lo descarta: queda Incierto, con la
+-- misma clave y el mismo limite de tiempo, y el motivo indica que paso.
 create or replace function public.fn_aviso_registrar(
   p_id_envio bigint, p_estado text, p_id_proveedor text, p_motivo text)
 returns text language plpgsql security definer
@@ -445,9 +473,13 @@ begin
     raise exception 'AVI_ESTADO|%', p_estado;
   end if;
   update avisos_envios
-     set estado = p_estado,
+     set estado = case when posible_envio and p_estado in ('Fallido', 'Omitido')
+                       then 'Incierto' else p_estado end,
+         posible_envio = posible_envio or p_estado = 'Incierto',
+         motivo = case when posible_envio and p_estado in ('Fallido', 'Omitido')
+                       then 'posible_envio_previo/' || coalesce(p_motivo, lower(p_estado))
+                       else p_motivo end,
          id_proveedor = coalesce(p_id_proveedor, id_proveedor),
-         motivo = p_motivo,
          enviado_en = case when p_estado = 'Enviado' then now() else enviado_en end
    where id_envio = p_id_envio and estado = 'Enviando'
   returning estado into v_estado;
@@ -463,9 +495,10 @@ end $$;
 -- ------------------------------------------------------------
 --   * Avisos, facturacion programada y datos internos: solo
 --     service_role (la Edge Function "avisos").
---   * fn_generar_facturas: ya no la ejecuta authenticated (una sesion
---     comun podia emitir facturas por la API). La web usa
---     fn_generar_facturas_gestion, que exige Admin o Directivo.
+--   * fn_generar_facturas_gestion: la ejecuta authenticated y exige Admin
+--     o Directivo. fn_generar_facturas TODAVIA conserva el permiso de
+--     authenticated para que la web publicada siga generando: se le quita
+--     en etapa22, despues de integrar la web nueva.
 --   * feriados y avisos_envios: sin acceso para anon ni authenticated
 --     (avisos_envios guarda correos).
 do $$
@@ -482,8 +515,7 @@ begin
     'public.fn_avisos_mensual(integer, integer)',
     'public.fn_avisos_deuda(date)',
     'public.fn_aviso_reservar(text, integer, integer, uuid, text, jsonb)',
-    'public.fn_aviso_registrar(bigint, text, text, text)',
-    'public.fn_generar_facturas(integer, integer, text)']
+    'public.fn_aviso_registrar(bigint, text, text, text)']
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
     execute format('grant execute on function %s to service_role', f);
@@ -501,9 +533,11 @@ grant all on table feriados, avisos_envios to service_role;
 -- 8) RESULTADO (solo lectura)
 -- ------------------------------------------------------------
 select 'Calendario de feriados' as control,
-       case when (select count(*) from feriados where fecha between '2026-01-01' and '2027-12-31') >= 30
+       case when (select count(*) from feriados where fecha in ('2026-03-23', '2026-07-10', '2026-12-07')
+                    and tipo = 'No laborable') = 3
+             and (select count(*) from feriados where fecha between '2026-01-01' and '2027-12-31') >= 36
             then 'OK' else 'FALLA' end as resultado,
-       (select count(*) from feriados)::text || ' fechas cargadas (2026 y 2027); revisar los no laborables por decreto' as detalle
+       (select count(*) from feriados)::text || ' fechas: 2026 completo (con la Res. 164/2025); 2027 con trasladables a confirmar y sin los no laborables turisticos' as detalle
 union all
 select 'Ultimo dia habil (ejemplos)',
        case when public.fn_ultimo_dia_habil(2026, 5) = date '2026-05-29'
@@ -522,12 +556,12 @@ select 'Funciones de avisos: solo service_role',
                           and not has_function_privilege('authenticated', p.oid, 'execute')
                           and has_function_privilege('service_role', p.oid, 'execute'))
             then 'OK' else 'FALLA' end,
-       'anon y authenticated sin EXECUTE (incluye fn_generar_facturas)'
+       'anon y authenticated sin EXECUTE'
   from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
  where ns.nspname = 'public'
    and p.proname in ('fn_facturacion_programada', 'fn_factura_historica', 'fn_avisos_mensual',
                      'fn_avisos_deuda', 'fn_aviso_reservar', 'fn_aviso_registrar',
-                     'fn_generar_facturas', 'fn_datos_factura')
+                     'fn_datos_factura')
 union all
 select 'Facturacion manual solo con rol',
        case when has_function_privilege('authenticated',
@@ -542,6 +576,10 @@ select 'Tablas sin acceso publico',
              and not has_table_privilege('anon', 'public.avisos_envios', 'select')
             then 'OK' else 'FALLA' end,
        'avisos_envios guarda correos: solo service_role'
+union all
+select 'Facturacion directa (fn_generar_facturas)',
+       'INFO',
+       'Sigue disponible para authenticated hasta etapa22 (despues de integrar la web)'
 union all
 select 'Cron NO programado por esta etapa',
        'INFO',
