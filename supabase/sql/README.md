@@ -19,6 +19,7 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa15_notificaciones_inscripciones.sql` | TP Met. II · RF9 (HU40) | Aviso automático al padre al inscribir, cambiar o dar de baja a su hijo en deportes, transporte o comedor (patrón Observer con triggers) |
 | `etapa16_valores.sql` | TP Met. II · Parte 3 · RF11.1–RF11.4 (HU46–HU49) | Tabla `valores_servicio`: valores de cuota, cada deporte, cada recorrido y comedor, con fecha de vigencia. Un valor por concepto, referencia y fecha (corregir = reemplazar el de esa fecha). Sin RLS (decisión del equipo) |
 | `etapa17_facturacion.sql` | TP Met. II · Parte 3 · RF11.5 (HU50, **etapa A, parcial**) | Tablas `facturas` y `factura_items`, `fn_generar_facturas` (único generador de cuotas y facturas), protecciones, columna `cuotas.cubierta_por_beca` y vistas de saldo. Antes: `verificaciones/relevamiento_cuotas.sql` |
+| `etapa18_comprobantes.sql` | TP Met. II · Parte 3 · RF12.4–RF12.6 (HU54–HU56) | Reutiliza `pagos` como comprobante de transferencia (+ tabla `pago_items`), bucket privado `pagos`, funciones solo para `service_role` (las usa la Edge Function `pagos`), protecciones, control en `fn_controlar_cuota`, vistas de saldo con "En revision" y `pagos` en Realtime. Antes: `verificaciones/relevamiento_etapa18.sql` |
 
 ## Etapa 17 — Facturación (HU50, etapa A)
 
@@ -80,6 +81,75 @@ comprobantes (`create or replace view`). La deuda de un período con factura
 se lee de estas vistas: la cuota **no se suma por fuera** de sus ítems.
 
 **Etapa B (pendiente):** último día hábil con feriados, pg_cron y PDF.
+
+## Etapa 18 — Comprobantes de pago (HU54 a HU56)
+
+Orden (lo ejecuta el equipo; la IA no corre SQL en Supabase):
+
+1. **`verificaciones/relevamiento_etapa18.sql`** (solo lectura). Todo tiene
+   que dar `OK` o `INFO`; cualquier `AVISAR` se pasa antes de seguir. Comprueba
+   que `pagos` siga vacía, que `id_cuota` acepte nulos, el check de
+   `metodo_pago`, que no haya columnas, tablas ni funciones con los nombres
+   nuevos, la configuración del bucket `pagos` si ya existe, la publicación
+   `supabase_realtime` y cuántos Admin, Directivo y Padre activos hay.
+2. **`etapa18_comprobantes.sql`**. El control previo corta sin aplicar nada si
+   `pagos` tiene filas, si `id_cuota` no acepta nulos, si una columna nueva ya
+   existe con otro tipo o si el bucket `pagos` existe y no es privado, de 5 MB
+   y JPG/PNG/PDF (`ETAPA18_BUCKET`: no lo modifica, se decide con el equipo).
+   Al final muestra una tabla: todo `OK` (RLS figura `INACTIVO`, como se
+   espera).
+3. **`verificaciones/pruebas_etapa18.sql`**. Como la de `etapa17`: termina
+   **siempre con un error a propósito** y no deja datos. Si todo pasa:
+   `PRUEBAS_ETAPA18_OK|16 controles (Q1 a Q16)`. Necesita 4 alumnos activos,
+   un Padre y un Admin o Directivo activos (no crea usuarios).
+4. Después: crear la Edge Function `pagos` (ver `supabase/functions/README.md`).
+
+Cómo funciona:
+- Cada fila nueva de `pagos` es **un comprobante de transferencia** para uno o
+  más ítems de **una** factura (`pago_items`). Una factura admite varios
+  comprobantes. Se reutilizan `monto_pagado` (total calculado por la base),
+  `fecha_pago` (fecha de carga), `metodo_pago` (Transferencia) e
+  `id_usuario_registra` (el padre).
+- Estados: `En revision` → `Aprobado` o `Rechazado` (con motivo de 5
+  caracteres o más). Cargar no acredita: el ítem sigue en el saldo. El padre
+  no anula; la administración rechaza y el ítem queda libre.
+- Un ítem está en un solo comprobante no rechazado (índice único parcial). No
+  se puede pagar un ítem Sin cargo, Pagado o En revisión. Las cuotas
+  heredadas sin factura se siguen pagando solo con "Registrar pagos".
+- Aprobar marca los ítems pagados y la cuota `Pagada` (fecha de aprobación,
+  Transferencia). Total emitido y facturas no cambian.
+- `fn_controlar_cuota` suma dos controles: "Registrar pagos" no puede pagar
+  una cuota con un comprobante En revisión (`CUO_EN_REVISION`), y una cuota
+  pagada no cambia su fecha ni su método (`CUO_PAGADA`).
+- **Idempotencia:** cada envío tiene una clave y una huella (usuario, factura,
+  ítems y contenido del archivo). La misma clave con la misma huella devuelve
+  el mismo comprobante; con otra, `PAG_CLAVE_REUSADA`.
+- **Concurrencia:** todas las operaciones bloquean en el mismo orden (factura
+  → pago → cuotas por `id_cuota`); "Registrar pagos" solo bloquea la cuota.
+- **Archivos:** bucket privado `pagos`, sin políticas en `storage.objects`.
+  Solo la Edge Function (service role) sube, firma y genera el PDF.
+- **Permisos:** las funciones solo las ejecuta `service_role` (se quita
+  EXECUTE a `public`, `anon` y `authenticated`) y tienen `search_path` fijo.
+  `authenticated` solo **lee** `pagos` y `pago_items`; escribir solo se puede
+  desde las funciones (trigger `PAG_SOLO_FUNCIONES`).
+- **Sin RLS (CLAUDE.md 3.1):** cualquier usuario con sesión puede leer
+  `pagos` y `pago_items` por la API y suscribirse a sus cambios en Realtime.
+  Los archivos solo se abren con URLs firmadas que entrega la Edge Function
+  después de controlar rol y pertenencia.
+
+*Verificado por la IA el 09/11 (no en Supabase):* el SQL en PGlite (PostgreSQL
+en memoria) con un esquema **simulado** de `pagos` igual al relevado el 08/11:
+`etapa18` dos veces, la prueba (16 de 16), `pruebas_etapa17` con `etapa18`
+aplicada (12 de 12) y 7 errores introducidos a propósito que la prueba
+detecta. **Concurrencia real** con PostgreSQL 17.6 local y dos sesiones a la
+vez (10 casos: misma clave, mismo ítem, carga contra "Registrar pagos" en los
+dos órdenes, dos aprobaciones, aprobar contra rechazar en los dos órdenes,
+aprobar contra "Registrar pagos" y dos operaciones sobre la misma factura sin
+bloqueo mutuo). Sin el bloqueo de la cuota, dos de esos casos fallan.
+
+*Ejecutado por el equipo en Supabase el 09/11 (informado por el equipo):*
+relevamiento compatible, `etapa18` con todos los controles en `OK` y RLS
+`INACTIVO`, y `pruebas_etapa18` con `PRUEBAS_ETAPA18_OK|16 controles`.
 
 ## Pasos manuales adicionales
 
