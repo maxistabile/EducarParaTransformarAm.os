@@ -22,6 +22,8 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa18_comprobantes.sql` | TP Met. II · Parte 3 · RF12.4–RF12.6 (HU54–HU56) | Reutiliza `pagos` como comprobante de transferencia (+ tabla `pago_items`), bucket privado `pagos`, funciones solo para `service_role` (las usa la Edge Function `pagos`), protecciones, control en `fn_controlar_cuota`, vistas de saldo con "En revision" y `pagos` en Realtime. Antes: `verificaciones/relevamiento_etapa18.sql` |
 | `etapa19_validar_solicitud_concurrente.sql` | TP Met. II · Parte 3 · corrección de HU54 | `fn_validar_solicitud`: dos envíos simultáneos con la misma clave devuelven el mismo comprobante (antes, el gemelo podía recibir `PAG_ITEM_NO_DISPONIBLE`). Requiere `etapa18`; no hace falta volver a ejecutarla |
 | `etapa20_factura_pdf.sql` | TP Met. II · Parte 3 · RF13.1 (HU57) y parte del PDF de RF11.5 (HU50) | `fn_datos_factura`: datos históricos de la factura emitida para generar su PDF (padre actual, Admin o Directivo; solo `service_role`). No escribe ni modifica facturas |
+| `etapa21_avisos_facturacion.sql` | TP Met. II · Parte 3 · RF11.5 (HU50 etapa B), RF14.1 y RF14.2 (HU60 y HU61), RNF9 | Calendario de `feriados`, último día hábil, facturación programada (reutiliza `fn_generar_facturas`), destinatarios y composición de los correos, registro de envíos `avisos_envios` con reserva atómica, y facturación manual solo para Admin y Directivo (`fn_generar_facturas_gestion`). No programa el cron |
+| `programar_avisos_cron.sql` / `desprogramar_avisos_cron.sql` | Activación manual del cron (HU50, HU60 y HU61) | Programan o quitan las tres corridas diarias con pg_cron y pg_net, usando secretos de Vault. Se corren a mano cuando el equipo decide activarlo |
 
 ## Etapa 17 — Facturación (HU50, etapa A)
 
@@ -227,6 +229,83 @@ Cómo funciona:
 simulado, `etapa20` dos veces (idempotente) y `pruebas_etapa20` 7 de 7; con
 `etapa17` a `etapa19` siguen `pruebas_etapa17` 12 de 12 y `pruebas_etapa18`
 16 de 16.
+
+*Ejecutado por el equipo en Supabase (informado por el equipo):* `etapa20` y
+`pruebas_etapa20`; la Edge Function `pagos` publicada y el recorrido de HU57 y
+HU58 aprobado.
+
+## Etapa 21 — Facturación programada y correos (HU50 etapa B, HU60 y HU61)
+
+Orden (lo ejecuta el equipo; la IA no corre SQL en Supabase):
+
+1. **`etapa21_avisos_facturacion.sql`**. Requiere `etapa17`, `etapa18` y
+   `etapa20`. Al final muestra una tabla: todo `OK`, el cron como `INFO` (no
+   se programa acá) y RLS `INACTIVO`.
+   - **Importante:** quita a `authenticated` el permiso de ejecutar
+     `fn_generar_facturas` (antes cualquier sesión, incluso un padre, podía
+     emitir facturas por la API). La web pasa a usar
+     `fn_generar_facturas_gestion`, que exige Admin o Directivo: **integrar el
+     PR enseguida después de ejecutar esta etapa**, porque la versión anterior
+     de la web deja de poder generar facturas.
+2. **`verificaciones/pruebas_etapa21.sql`**: termina **siempre con un error a
+   propósito** y no deja datos. Si todo pasa:
+   `PRUEBAS_ETAPA21_OK|9 controles (S1 a S9)`. Necesita 3 alumnos activos, un
+   Padre y un Admin o Directivo activos. Conviene repetir también
+   `pruebas_etapa20` (cambió `fn_datos_factura` por dentro, con el mismo
+   resultado).
+3. Revisar el calendario: `select * from feriados order by fecha;`. Están los
+   feriados nacionales de 2026 y 2027 según la Ley 27.399 (con los traslados
+   del art. 6). **Los días no laborables con fines turísticos se fijan por
+   decreto cada año: cargarlos** con tipo `No laborable` antes de activar el
+   cron (ver el comentario en el script).
+4. Publicar las Edge Functions y probar en simulación
+   (`supabase/functions/README.md`).
+5. **Activar el cron** recién cuando el equipo lo decida:
+   `programar_avisos_cron.sql` (requisitos en su encabezado: pg_cron, pg_net y
+   dos secretos en Vault). Para apagarlo: `desprogramar_avisos_cron.sql`.
+
+Cómo funciona:
+- **Día hábil:** no es sábado, domingo ni figura en `feriados`.
+  `fn_ultimo_dia_habil(anio, mes)` va hacia atrás desde el último día del mes.
+  La fecha de "hoy" se calcula en `America/Argentina/Buenos_Aires`.
+- **HU50 etapa B:** `fn_facturacion_programada(fecha)` solo actúa el último
+  día hábil y emite las facturas del mes siguiente (cambio de año incluido)
+  con `fn_generar_facturas(..., 'Programada')`: vencen el día 10, una por
+  alumno y período, sin tocar lo emitido. Repetirla o correrla dos veces a la
+  vez no duplica.
+- **HU60:** `fn_avisos_mensual(anio, mes)` arma, por padre, la composición por
+  hijo de las facturas del período (datos históricos) y el total.
+- **HU61:** `fn_avisos_deuda(fecha)` arma, por padre con deuda, los ítems con
+  saldo de facturas ya vencidas y las cuotas anteriores sin factura. Un
+  comprobante En revisión no acredita (sigue en la deuda, marcado); Sin cargo
+  no es deuda; un padre sin deuda no recibe nada.
+- **Registro de envíos (RNF9):** `avisos_envios` tiene un registro por (tipo,
+  período, padre). `fn_aviso_reservar` lo reserva con la fila bloqueada: dos
+  corridas a la vez no envían dos veces. Estados:
+  - **Enviado:** el proveedor lo aceptó.
+  - **Fallido:** el proveedor lo rechazó; no se envió y se reintenta con clave nueva, hasta 3 veces.
+  - **Incierto:** respuesta ambigua; se reintenta solo con la **misma** clave y el mismo contenido dentro de las 23 h, y después queda para revisión.
+  - **Omitido:** no se llamó al proveedor.
+- **Seguridad:** las funciones de avisos solo las ejecuta `service_role`;
+  `feriados` y `avisos_envios` no son accesibles para `anon` ni
+  `authenticated` (la tabla guarda correos). RLS no cambia.
+
+Consultas útiles (solo lectura):
+```sql
+select tipo, anio, mes, estado, motivo, intentos, enviado_en
+  from avisos_envios order by creado desc limit 50;
+select * from cron.job_run_details where command like '%fn_avisos_disparar%'
+ order by start_time desc limit 20;
+```
+
+*Verificado por la IA el 09/11 (no en Supabase):*
+- **PGlite:** `etapa21` dos veces y `pruebas_etapa21` 9 de 9. Siguen bien
+  `pruebas_etapa17` (12), `pruebas_etapa18` (16) y `pruebas_etapa20` (7).
+- **Concurrencia real** (PostgreSQL 17.6 local, sesiones coordinadas con
+  `pg_locks`): misma reserva, reintento de un Fallido y facturación programada
+  a la vez (K1 a K3).
+- **K4:** detiene una sesión entre leer y actualizar la reserva; sin el
+  `FOR UPDATE`, falla.
 
 ## Pasos manuales adicionales
 
