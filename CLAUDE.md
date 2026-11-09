@@ -17,7 +17,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 | Parte 2 – Sistema de gestión web (RF1 a RF9, HU1 a HU40) | ✅ Terminado, desplegado y evaluado (27/10) |
 | TP Unidad 4 – CI/CD y optimización | ✅ Entregado |
 | TP Unidad 5 – Pruebas y calidad | ✅ Entregado |
-| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18), HU41, HU42 y parte de HU45 (PR #19), HU43 y HU44 (PR #24) y HU46 a HU49 (PR #27). HU45 no queda completa: ver sección 3.1. **HU50 en curso, parcial** (etapa A en `feat/HU50-facturacion`; la etapa B, pendiente). |
+| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18), HU41, HU42 y parte de HU45 (PR #19), HU43 y HU44 (PR #24), HU46 a HU49 (PR #27), HU50 etapa A (PR #30) y HU59 (PR #32). HU45 no queda completa: ver sección 3.1. **HU50 parcial** (falta la etapa B). **HU51, HU52 parcial y HU53 parcial en curso** en `feat/HU51-53-cuotas-pagos-app`. |
 
 ### Fechas que no se mueven
 - **09/11/2026 – Cierre de desarrollo:** integración, pruebas integrales y despliegue final de la PWA (según el plan).
@@ -190,8 +190,13 @@ Cada paso es un PR (o pocos). Priorizar que el flujo **"consultar cuota → paga
 2. **HU41–HU45:** ✅ HU41, HU42 y parte de HU45 (PR #19); ✅ HU43 y HU44 (PR #24). HU45 no queda completa (sección 3.1).
 3. **etapa16 en adelante (SQL), en scripts separados por bloque:** ✅ valores (`etapa16`); facturas, ítems y corrección de `'Efectivo'` (`etapa17`, HU50 etapa A); faltan comprobantes, envíos y bucket privado.
 4. ✅ **HU46–HU49:** valores en `gestion/GestionValores.tsx`, para Admin y Directivo (PR #27).
-5. **HU50:** facturación, **parcial**. Etapa A: `fn_generar_facturas` (invocable a mano o desde la sección Facturación), único generador de cuotas y facturas; la cuota del período es el ítem Cuota de su factura; el saldo se lee de `v_facturas_saldo` y `v_factura_items_saldo` (contrato para HU51 a HU56). Etapa B, pendiente: último día hábil con feriados, pg_cron y PDF bajo demanda reutilizable por HU60.
-6. **HU51–HU53 y HU59:** consultas del padre/alumno en la app. HU59 en `feat/HU59-inscripciones-app` (`ServicioAlumnosApp`, selector de alumno e inscripciones de solo lectura). HU51 a HU53 en un segundo PR: cuotas heredadas sin factura aparte, HU52 parcial hasta HU56, HU53 solo con pagos administrativos y los conceptos cubiertos por beca como "Sin cargo".
+5. **HU50:** facturación, **parcial**. Etapa A: `fn_generar_facturas` (invocable a mano o desde la sección Facturación), único generador de cuotas y facturas; la cuota del período es el ítem Cuota de su factura; el saldo se lee de `v_facturas_saldo` y `v_factura_items_saldo` (contrato para HU51 a HU56). Etapa B, pendiente: último día hábil con feriados, pg_cron y PDF bajo demanda reutilizable por HU60. Pendiente de definir: el cobro de las inscripciones dadas de alta después de emitir la factura (sección 11).
+6. **HU51–HU53 y HU59:** consultas del padre/alumno en la app. ✅ HU59 (PR #32: `ServicioAlumnosApp`, selector de alumno e inscripciones de solo lectura). HU51 a HU53 en `feat/HU51-53-cuotas-pagos-app`: `ServicioCuotas` y `ServicioPagos` (solo Padre y alumnos de la sesión), lógica en `app/reglasCuentaAlumno.ts`.
+   - HU51: facturas con saldo desde las vistas de `etapa17` y, aparte, las cuotas heredadas sin factura (no vinculadas por `id_cuota`).
+   - HU52 parcial hasta HU56: cuotas pagadas con la fecha de pago registrada ("Sin fecha registrada" si falta); no hay fecha de aprobación ni comprobante.
+   - HU53 parcial: solo pagos registrados por la administración, identificados así; sin En revisión ni Rechazado (HU54/HU55). No lee la tabla `pagos`.
+   - Neto 0 en "Sin cargo", aparte; "Cubierta por beca" solo si el dato lo respalda.
+   - Recorrido manual aprobado por el equipo (08/11), salvo la beca del 100 %, que no se probó a mano por falta de un caso. Android, pendiente.
 7. **HU54 → HU55 → HU56:** carga de comprobante, aprobación en la web (con Realtime) y comprobante PDF.
 8. **HU57 y HU58:** facturas por período y deuda por ítem.
 9. **HU60 y HU61:** correos programados, reutilizando `enviar-notificacion` / Resend. Probar con **fechas simuladas** (parámetro de fecha) y `EMAIL_ALLOWLIST`.
@@ -249,8 +254,25 @@ El plan define la bitácora como una **planilla compartida en Google Drive** que
 - El alta de alumnos usa el DNI como contraseña (`AdminPanel.tsx`), que puede tener 7 dígitos. Subir a 8 la longitud mínima global de Supabase Auth podría romper esas altas: revisarlo antes de cambiar ese ajuste.
 
 - **Pendientes detectados en el recorrido de HU59 (08/11/2026), sin HU asignada y sin implementar:**
-  - Al crear un alumno desde Alumnos no se crea su cuenta, y después no hay un flujo para vincularle un usuario. Evaluar una solución mínima que conserve el legajo y evite duplicar cuentas.
+  - Al crear un alumno desde Alumnos no se crea su cuenta, y después no hay un flujo para vincularle un usuario. Se amplió en el bloque de altas y vinculación (abajo).
   - Admin, Directivo y Docente acceden bien a la web de gestión, pero su presentación en celular necesita revisión. Esos roles siguen fuera de la PWA; evaluar ajustes concretos de compatibilidad móvil.
+
+- **Bloque pendiente: altas y vinculación de cuentas y legajos** (relacionado con HU7, HU11, HU20 y el acceso de HU41). Va en un bloque y un PR propios, separado de cuotas y pagos. Sin implementar; registrarlo no completa ninguna de esas HU.
+  - **Correcciones necesarias:**
+    - Segundo hijo: reutilizar al padre existente y crear solo la cuenta y el legajo del nuevo alumno.
+    - Usuario Alumno nuevo: crear o vincular su legajo sin crear un tutor automáticamente.
+    - Legajo existente sin cuenta: crear o vincular su usuario sin duplicar el legajo.
+    - Asociar alumnos existentes con padres existentes, validando el rol y sin reemplazar un vínculo sin confirmación.
+  - **Consulta de los vínculos existentes** (con las correcciones de HU20 y las altas), reutilizando las relaciones que ya existen:
+    - Alumnos: padre/tutor asociado (nombre y correo) y si el alumno tiene cuenta propia vinculada.
+    - Usuarios con rol Padre: hijos asociados, con nombre y legajo.
+    - Usuarios con rol Alumno o Docente: el legajo correspondiente.
+    - Vínculos faltantes indicados por separado: "Sin tutor asociado", "Sin cuenta de acceso" y "Sin legajo vinculado".
+    - En la ficha o con "Ver vínculos", sin recargar los listados ni mostrar contraseñas, dentro de los permisos de gestión existentes.
+  - **Mejoras de navegación:** acceso a esos flujos desde Alumnos y Docentes, reutilizando la lógica de Usuarios.
+  - **Mejora posterior:** comparar los datos del tutor de una nueva inscripción con los existentes y mostrar las diferencias antes de actualizarlos. No sobrescribir automáticamente su identidad, correo ni credenciales.
+
+- **Pendiente de definir: cobro de las altas posteriores a la factura** (detectado en el recorrido de HU51 a HU53, 08/11/2026). Una inscripción dada de alta después de emitir la factura del período no se incorpora a ella ni genera otra. Hay que definir y resolver cómo se cobra, conservando la inmutabilidad de las facturas emitidas. Sin implementar.
 
 ---
 
