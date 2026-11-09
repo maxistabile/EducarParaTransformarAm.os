@@ -23,6 +23,9 @@
 //   recibo       {id_pago}          Genera (si falta) y firma el comprobante PDF.
 //   factura      {id_factura}       Genera (si falta) y firma el PDF de la FACTURA
 //                                   (HU57; padre actual, Admin o Directivo).
+//   factura_sistema {id_factura}    Solo la función "avisos" (HU60), con el secret
+//                                   AVISOS_CLAVE en x-avisos-clave: asegura el PDF
+//                                   y devuelve su ruta (sin URL ni datos).
 //
 // Respuesta: { ok: true, ... } o { ok: false, codigo, detalle? }. Los
 // códigos (PAG_..., CUO_...) los traduce el frontend.
@@ -374,9 +377,7 @@ async function crearPdfFactura(d: DatosFactura): Promise<Uint8Array> {
 }
 
 /** Genera el PDF de la factura si falta (ruta fija, sin upsert) y devuelve su ruta. */
-async function asegurarFacturaPdf(db: SupabaseClient, usuario: string, idFactura: number): Promise<string> {
-  // Identidad, rol y pertenencia actual se controlan en la base, en cada llamada
-  const datos = await rpc<DatosFactura>(db, 'fn_datos_factura', { p_usuario: usuario, p_id_factura: idFactura })
+async function asegurarFacturaPdf(db: SupabaseClient, idFactura: number, datos: DatosFactura): Promise<string> {
   const nombre = `${idFactura}.pdf`
   const ruta = `facturas/${nombre}`
   const { data } = await db.storage.from(BUCKET).list('facturas', { search: nombre })
@@ -402,11 +403,43 @@ async function urlFirmada(db: SupabaseClient, ruta: string): Promise<string> {
 }
 
 // ── Entrada ────────────────────────────────────────────────────
+/** Comparación en tiempo constante (no corta en la primera diferencia). */
+function mismaClave(recibida: string, esperada: string): boolean {
+  const a = new TextEncoder().encode(recibida)
+  const b = new TextEncoder().encode(esperada)
+  let distinto = a.length === b.length ? 0 : 1
+  for (let i = 0; i < b.length; i++) distinto |= (a.at(i) ?? 0) ^ (b.at(i) ?? 0)
+  return distinto === 0
+}
+
+/**
+ * HU60: acción interna de la función "avisos" (no la usa ninguna sesión).
+ * Exige el secret AVISOS_CLAVE en x-avisos-clave. Asegura el PDF de la
+ * factura con los mismos datos históricos (fn_factura_historica) y
+ * devuelve solo su ruta: "avisos" lo descarga con la service role.
+ */
+async function accionInterna(req: Request, recibida: string): Promise<Response> {
+  const esperada = Deno.env.get('AVISOS_CLAVE') ?? ''
+  if (esperada.length < 32 || !mismaClave(recibida, esperada))
+    return responder({ ok: false, codigo: 'PAG_SIN_PERMISO' }, 401)
+  const cuerpo = (await req.json().catch(() => ({}))) as Record<string, unknown>
+  const idFactura = Number(cuerpo.id_factura)
+  if (cuerpo.accion !== 'factura_sistema' || !Number.isInteger(idFactura) || idFactura <= 0)
+    throw new ErrorPago('PAG_SOLICITUD_INVALIDA', '', 400)
+  const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const datos = await rpc<DatosFactura>(db, 'fn_factura_historica', { p_id_factura: idFactura })
+  return responder({ ok: true, ruta: await asegurarFacturaPdf(db, idFactura, datos) })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return responder({ ok: false, codigo: 'PAG_SOLICITUD_INVALIDA' }, 405)
 
   try {
+    const claveInterna = req.headers.get('x-avisos-clave')
+    if (claveInterna !== null) return await accionInterna(req, claveInterna)
     const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '')
     if (!token) throw new ErrorPago('PAG_SIN_SESION', '', 401)
     const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', {
@@ -465,7 +498,9 @@ Deno.serve(async (req) => {
         const idFactura = Number(cuerpo.id_factura)
         if (!Number.isInteger(idFactura) || idFactura <= 0)
           throw new ErrorPago('PAG_SOLICITUD_INVALIDA', '', 400)
-        const ruta = await asegurarFacturaPdf(db, usuario, idFactura)
+        // Identidad, rol y pertenencia actual se controlan en la base, en cada llamada
+        const datos = await rpc<DatosFactura>(db, 'fn_datos_factura', { p_usuario: usuario, p_id_factura: idFactura })
+        const ruta = await asegurarFacturaPdf(db, idFactura, datos)
         return responder({ ok: true, url: await urlFirmada(db, ruta) })
       }
       default:

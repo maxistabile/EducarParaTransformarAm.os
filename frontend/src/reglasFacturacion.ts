@@ -157,6 +157,8 @@ export function mensajeErrorFacturacion(error: {
       return 'La cuota ya está facturada: no se puede cambiar su alumno, período, vencimiento ni importe.'
     case 'CUO_METODO':
       return 'Los pagos se registran solo por transferencia.'
+    case 'PAG_SIN_PERMISO':
+      return 'Solo Admin o Directivo pueden generar facturas.'
   }
   switch (error.code) {
     case 'PGRST202':

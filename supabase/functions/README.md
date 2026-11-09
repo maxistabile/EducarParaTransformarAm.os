@@ -148,3 +148,82 @@ select o.name, o.created_at
 ```
 
 Se borran desde **Storage → pagos**, revisando antes cada uno.
+
+## Acción interna `factura_sistema` (HU60)
+
+La usa solo la función `avisos` para adjuntar la factura: exige el secret
+`AVISOS_CLAVE` en el encabezado `x-avisos-clave` (comparado en tiempo
+constante) y devuelve solo la ruta del PDF, generado con los mismos datos
+históricos (`fn_factura_historica`). Una sesión común no puede usarla.
+**Esta versión de `pagos` hay que volver a publicarla** (Verify JWT activado).
+
+---
+
+# Edge Function `avisos` (HU50 etapa B, HU60 y HU61)
+
+Facturación del mes siguiente el último día hábil, correo con la factura
+(HU60) y aviso de deuda del día 20 (HU61). La dispara pg_cron. Código:
+`supabase/functions/avisos/index.ts` (un solo archivo).
+
+No reemplaza a `enviar-notificacion`, que queda igual. Esa función no adjunta
+archivos, no tiene idempotencia ni resultado por destinatario, y la puede
+llamar cualquier sesión. `avisos` reutiliza su proveedor (Resend), sus secrets y
+el estilo del correo.
+
+## Secrets (Edge Functions → Secrets)
+
+| Secret | Uso |
+|---|---|
+| `AVISOS_CLAVE` | **Nuevo.** 32 caracteres o más, al azar (por ejemplo, `openssl rand -hex 32`). Lo usan `avisos`, la acción interna de `pagos` y el cron (por Vault). No va al repo ni al frontend. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Los mismos de `enviar-notificacion`. |
+| `EMAILS_HABILITADOS` | `true` para enviar de verdad. Mientras no esté en `true`, todo queda `Omitido`. |
+| `EMAIL_ALLOWLIST` | Correos autorizados, separados por coma. **Sin allowlist no se envía nada** (demo con datos ficticios). |
+
+`RESEND_API_URL` y `AVISOS_HOY_PRUEBA` son solo para pruebas locales: **no
+definirlos en Supabase**.
+
+## Despliegue desde el dashboard
+
+Va en el paso 2 de la secuencia única de `supabase/sql/README.md` (Etapa 21):
+después de los secrets y **antes** de los cambios de SQL.
+
+1. Volver a publicar `pagos` con `supabase/functions/pagos/index.ts` (Verify
+   JWT **activado**).
+2. **Edge Functions → Deploy a new function → Via Editor**, nombre `avisos`,
+   pegar todo `supabase/functions/avisos/index.ts` y desplegar.
+3. En la configuración de `avisos`, **desactivar Verify JWT**: la llama pg_cron
+   y la protege `AVISOS_CLAVE` (sin la clave responde 401).
+4. No tocar `crear-usuario`.
+
+Estados de cada envío (tabla `avisos_envios`):
+- **Enviado.**
+- **Fallido:** el proveedor rechazó; se reintenta con clave nueva.
+- **Incierto:** puede haberse enviado. Se reintenta solo con la misma clave,
+  destinatario y contenido dentro de las 23 h del primer intento; después,
+  revisión manual.
+- **Omitido:** no se llamó al proveedor.
+
+Si un intento **pudo** llegar al proveedor, un problema posterior
+(desactivado, allowlist, PDF, 429 u otro rechazo) no lo descarta: sigue
+Incierto ("incierto_conservado" en la respuesta).
+
+## Probar sin enviar ni escribir (simulación)
+
+Desde una terminal (la clave no se guarda en ningún archivo):
+```
+curl -X POST https://<ref>.supabase.co/functions/v1/avisos -H "x-avisos-clave: <AVISOS_CLAVE>" -H "Content-Type: application/json" -d "{\"simular\":true,\"fecha\":\"2026-11-30\"}"
+```
+Con `simular` no factura, no reserva ni envía. Muestra qué haría para esa
+fecha: si factura y qué período, cuántos destinatarios y si cada correo está
+en la allowlist. Probar con el último día hábil (30/11/2026), un sábado
+(28/11/2026), el 31/12/2026 (factura enero 2027) y un día 20 (20/12/2026).
+La respuesta no trae correos ni nombres.
+
+`recuperar: true` con una fecha pasada rehace un día en que el cron falló.
+Sí escribe y envía, sin duplicar lo ya enviado.
+
+## Respuesta y registro
+
+La respuesta y los logs solo tienen conteos y códigos. El detalle de cada
+envío queda en la tabla `avisos_envios` (solo `service_role`): estado,
+motivo, intentos, id del proveedor y la composición enviada.

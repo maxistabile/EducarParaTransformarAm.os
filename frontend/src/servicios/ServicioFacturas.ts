@@ -3,7 +3,8 @@
 // ═══════════════════════════════════════════════════════════════
 // Único punto por el que la pantalla de Facturación usa la base. Usa la
 // instancia única del cliente (Singleton, src/lib/supabase.ts).
-// La generación vive en la base (fn_generar_facturas): crea las
+// La generación vive en la base (fn_generar_facturas, que la web llama
+// por fn_generar_facturas_gestion: solo Admin o Directivo): crea las
 // facturas, sus ítems y la cuota del período si falta, sin pisar nada.
 // El saldo se lee de las vistas v_facturas_saldo y v_factura_items_saldo
 // (total emitido ≠ saldo pendiente).
@@ -93,10 +94,19 @@ export const ServicioFacturas = {
   ): Promise<{ ok: true; resumen: ResumenGeneracion } | Fallo> {
     const validado = validarPeriodo(periodo, hoy)
     if (!validado.ok) return Promise.resolve(validado)
+    // fn_generar_facturas_gestion (etapa21) exige Admin o Directivo; la
+    // función de fondo ya no la puede llamar cualquier sesión.
     return Promise.resolve(
-      supabase.rpc('fn_generar_facturas', { p_anio: periodo.anio, p_mes: periodo.mes }),
+      supabase.rpc('fn_generar_facturas_gestion', { p_anio: periodo.anio, p_mes: periodo.mes }),
     ).then(
       ({ data, error }) => {
+        if (error && ['PGRST202', '42883'].includes(resumenError(error).code ?? '')) {
+          console.error('[ServicioFacturas] generarPeriodo:', { code: resumenError(error).code })
+          return {
+            ok: false as const,
+            mensaje: 'Falta ejecutar etapa21_avisos_facturacion.sql en la base. Avisá al equipo.',
+          }
+        }
         if (error) return fallo('generarPeriodo', error)
         const r = (data ?? {}) as Record<string, unknown>
         return {

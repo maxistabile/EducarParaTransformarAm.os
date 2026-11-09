@@ -75,8 +75,8 @@ afterEach(() => {
 })
 
 describe('ServicioFacturas.generarPeriodo (HU50)', () => {
-  it('llama a fn_generar_facturas con el período y devuelve el resumen en números', async () => {
-    responder('fn_generar_facturas', {
+  it('llama a fn_generar_facturas_gestion con el período y devuelve el resumen en números', async () => {
+    responder('fn_generar_facturas_gestion', {
       data: { periodo: '2026-12', nuevas: 6, ya_emitidas: 0, cuotas_previas: 1, total: '112700.00' },
       error: null,
     })
@@ -97,7 +97,7 @@ describe('ServicioFacturas.generarPeriodo (HU50)', () => {
   })
 
   it('si falta un valor, muestra cuál y que no se emitió nada', async () => {
-    responder('fn_generar_facturas', {
+    responder('fn_generar_facturas_gestion', {
       data: null,
       error: { code: 'P0001', message: 'FAC_SIN_VALOR|01/12/2026|Deporte: Handball' },
     })
@@ -114,16 +114,24 @@ describe('ServicioFacturas.generarPeriodo (HU50)', () => {
     })
   })
 
-  it('si la función no existe, avisa que falta la migración', async () => {
-    responder('fn_generar_facturas', { data: null, error: { code: 'PGRST202', message: 'x' } })
+  it('si la función no existe, avisa que falta la migración (etapa21)', async () => {
+    responder('fn_generar_facturas_gestion', { data: null, error: { code: 'PGRST202', message: 'x' } })
     const resultado = await ServicioFacturas.generarPeriodo({ anio: 2026, mes: 12 }, noviembre)
     expect(resultado).toMatchObject({ ok: false })
-    if (!resultado.ok) expect(resultado.mensaje).toMatch(/etapa17/)
+    if (!resultado.ok) expect(resultado.mensaje).toMatch(/etapa21/)
+  })
+
+  it('una sesión que no es Admin ni Directivo recibe un mensaje claro', async () => {
+    responder('fn_generar_facturas_gestion', { data: null, error: { code: 'P0001', message: 'PAG_SIN_PERMISO' } })
+    expect(await ServicioFacturas.generarPeriodo({ anio: 2026, mes: 12 }, noviembre)).toEqual({
+      ok: false,
+      mensaje: 'Solo Admin o Directivo pueden generar facturas.',
+    })
   })
 
   it('si la promesa se rechaza, no rechaza y avisa', async () => {
     estado.respuestas.push({
-      destino: 'fn_generar_facturas',
+      destino: 'fn_generar_facturas_gestion',
       respuesta: null,
       rechazo: new TypeError('Failed to fetch'),
     })
