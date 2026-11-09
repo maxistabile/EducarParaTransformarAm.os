@@ -66,6 +66,8 @@ const MENSAJES: ReadonlyMap<string, string> = new Map([
     'No pudimos generar el comprobante de pago. Intentá de nuevo en unos minutos.',
   ],
   ['PAG_ARCHIVO_NO_DISPONIBLE', 'No pudimos abrir el archivo. Intentá de nuevo.'],
+  ['PAG_FACTURA_NO_EXISTE', 'La factura no existe.'],
+  ['PAG_FACTURA_PENDIENTE', 'No pudimos generar el PDF de la factura. Intentá de nuevo en unos minutos.'],
   ['PAG_RED', 'No pudimos comunicarnos con el servidor. Revisá tu conexión e intentá de nuevo.'],
   ['PAG_ERROR', MENSAJE_GENERICO],
 ])

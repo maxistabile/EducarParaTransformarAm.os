@@ -21,6 +21,7 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa17_facturacion.sql` | TP Met. II · Parte 3 · RF11.5 (HU50, **etapa A, parcial**) | Tablas `facturas` y `factura_items`, `fn_generar_facturas` (único generador de cuotas y facturas), protecciones, columna `cuotas.cubierta_por_beca` y vistas de saldo. Antes: `verificaciones/relevamiento_cuotas.sql` |
 | `etapa18_comprobantes.sql` | TP Met. II · Parte 3 · RF12.4–RF12.6 (HU54–HU56) | Reutiliza `pagos` como comprobante de transferencia (+ tabla `pago_items`), bucket privado `pagos`, funciones solo para `service_role` (las usa la Edge Function `pagos`), protecciones, control en `fn_controlar_cuota`, vistas de saldo con "En revision" y `pagos` en Realtime. Antes: `verificaciones/relevamiento_etapa18.sql` |
 | `etapa19_validar_solicitud_concurrente.sql` | TP Met. II · Parte 3 · corrección de HU54 | `fn_validar_solicitud`: dos envíos simultáneos con la misma clave devuelven el mismo comprobante (antes, el gemelo podía recibir `PAG_ITEM_NO_DISPONIBLE`). Requiere `etapa18`; no hace falta volver a ejecutarla |
+| `etapa20_factura_pdf.sql` | TP Met. II · Parte 3 · RF13.1 (HU57) y parte del PDF de RF11.5 (HU50) | `fn_datos_factura`: datos históricos de la factura emitida para generar su PDF (padre actual, Admin o Directivo; solo `service_role`). No escribe ni modifica facturas |
 
 ## Etapa 17 — Facturación (HU50, etapa A)
 
@@ -188,6 +189,44 @@ confirmado en `pg_locks`). Sin `etapa19` falla (el gemelo recibe
 otra huella, las claves distintas sobre el mismo ítem y las regresiones
 (concurrencia 10 de 10, `pruebas_etapa18` 16 de 16, `pruebas_etapa17` 12
 de 12 y la Edge Function 13 de 13).
+
+*Ejecutado por el equipo en Supabase el 09/11 (informado por el equipo):*
+`etapa19` y la repetición de `pruebas_etapa18` dieron el resultado esperado.
+El recorrido manual de esta corrección **no se hizo** (decisión del equipo).
+
+## Etapa 20 — Datos de la factura para su PDF (HU57; parte del PDF de HU50)
+
+Orden (lo ejecuta el equipo; la IA no corre SQL en Supabase):
+
+1. **`etapa20_factura_pdf.sql`**. Requiere `etapa17` y `etapa18` (si faltan,
+   corta con `ETAPA20_REQUIERE_ETAPA17` o `ETAPA20_REQUIERE_ETAPA18`). Solo
+   crea `fn_datos_factura` y sus permisos. Al final muestra una tabla: todo
+   `OK` y RLS `INACTIVO`.
+2. **`verificaciones/pruebas_etapa20.sql`**: termina **siempre con un error a
+   propósito** y no deja datos. Si todo pasa:
+   `PRUEBAS_ETAPA20_OK|7 controles (R1 a R7)`. Necesita 2 alumnos activos,
+   un Padre y un Admin o Directivo activos (no crea usuarios).
+3. Después: volver a publicar la Edge Function `pagos` (acción `factura`).
+
+Cómo funciona:
+- `fn_datos_factura(usuario, id_factura)` devuelve solo datos **históricos**:
+  los copiados en `facturas` al emitir (alumno, DNI, curso, período, emisión,
+  vencimiento y total) y sus ítems (descripción, importe, descuento, beca y
+  neto). No arma el documento con alumnos ni valores actuales.
+- Acceso: el padre **actual** del alumno, o Admin y Directivo. Docente y
+  Alumno no (`PAG_SIN_PERMISO`); otro padre, `PAG_FACTURA_AJENA`; factura
+  inexistente, `PAG_FACTURA_NO_EXISTE`.
+- **No escribe**: la factura emitida no cambia (`pdf_path` queda como está).
+  El PDF lo genera la Edge Function en la ruta fija `facturas/<id>.pdf` del
+  bucket privado `pagos`, una sola vez y sin upsert.
+- Solo la ejecuta `service_role`, con `search_path` fijo. RLS no cambia.
+- HU50 sigue **parcial**: falta la programación automática (último día
+  hábil, feriados y pg_cron).
+
+*Verificado por la IA el 09/11 (no en Supabase):* en PGlite con el esquema
+simulado, `etapa20` dos veces (idempotente) y `pruebas_etapa20` 7 de 7; con
+`etapa17` a `etapa19` siguen `pruebas_etapa17` 12 de 12 y `pruebas_etapa18`
+16 de 16.
 
 ## Pasos manuales adicionales
 

@@ -202,6 +202,24 @@ describe('estadoClave, archivos y revisión', () => {
     ])
   })
 
+  it('urlFactura pide el PDF de la factura por su id (no el comprobante de pago)', async () => {
+    estado.respuesta = { data: { ok: true, url: 'https://x/facturas/4.pdf?token=t' }, error: null }
+    expect(await ServicioPagos.urlFactura(4)).toEqual({ ok: true, url: 'https://x/facturas/4.pdf?token=t' })
+    expect(estado.invocaciones[0].body).toEqual({ accion: 'factura', id_factura: 4 })
+  })
+
+  it('urlFactura de una factura ajena o inexistente da un mensaje claro y no rechaza', async () => {
+    estado.respuesta = { data: { ok: false, codigo: 'PAG_FACTURA_AJENA' }, error: null }
+    expect(await ServicioPagos.urlFactura(4)).toMatchObject({
+      ok: false,
+      mensaje: 'Esa factura no corresponde a un hijo asociado a tu cuenta.',
+    })
+    estado.respuesta = { data: { ok: false, codigo: 'PAG_FACTURA_NO_EXISTE' }, error: null }
+    expect(await ServicioPagos.urlFactura(4)).toMatchObject({ ok: false, mensaje: 'La factura no existe.' })
+    estado.respuesta = { data: { ok: false, codigo: 'PAG_FACTURA_PENDIENTE' }, error: null }
+    expect(await ServicioPagos.urlFactura(4)).toMatchObject({ ok: false, reintentable: false })
+  })
+
   it('revisar informa si el comprobante de pago quedó pendiente', async () => {
     estado.respuesta = { data: { ok: true, estado_pago: 'Aprobado', ya_revisado: false, recibo: 'pendiente' }, error: null }
     expect(await ServicioPagos.revisar(4, true, null)).toEqual({ ok: true, estado: 'Aprobado', yaRevisado: false, recibo: 'pendiente' })

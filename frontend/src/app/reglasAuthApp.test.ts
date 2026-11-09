@@ -176,10 +176,11 @@ describe('mensajeErrorIngreso (HU41)', () => {
 })
 
 describe('menú por rol (HU45)', () => {
-  it('el padre ve cuotas, pagos e inscripciones', () => {
+  it('el padre ve cuotas, facturas, pagos e inscripciones', () => {
     expect(seccionesSegunRol('Padre')).toEqual([
       'inicio',
       'cuotas',
+      'facturas',
       'pagos',
       'inscripciones',
       'perfil',
@@ -190,6 +191,7 @@ describe('menú por rol (HU45)', () => {
     expect(puedeVerSeccion('Alumno', 'inscripciones')).toBe(true)
     expect(puedeVerSeccion('Alumno', 'cuotas')).toBe(false)
     expect(puedeVerSeccion('Alumno', 'pagos')).toBe(false)
+    expect(puedeVerSeccion('Alumno', 'facturas')).toBe(false)
   })
 
   it('un rol o una sección inesperados no habilitan nada', () => {
@@ -198,6 +200,6 @@ describe('menú por rol (HU45)', () => {
       expect(seccionesSegunRol(rol as RolApp)).toEqual([])
       expect(puedeVerSeccion(rol as RolApp, 'inicio')).toBe(false)
     }
-    expect(puedeVerSeccion('Padre', 'facturas' as Seccion)).toBe(false)
+    expect(puedeVerSeccion('Padre', 'listados' as Seccion)).toBe(false)
   })
 })
