@@ -19,8 +19,14 @@ export const MESES = [
 /** Estado de cobro que calcula v_facturas_saldo. */
 export type EstadoCobro = 'Pendiente' | 'Parcial' | 'Pagada' | 'Vencida' | 'Sin cargo'
 
-/** Estado de cada ítem que calcula v_factura_items_saldo. */
-export type EstadoPagoItem = 'Pendiente' | 'Pagado' | 'Sin cargo'
+/** Estado de cada ítem que calcula v_factura_items_saldo ('En revision':
+ *  tiene un comprobante cargado sin aprobar; desde etapa18). */
+export type EstadoPagoItem = 'Pendiente' | 'Pagado' | 'Sin cargo' | 'En revision'
+
+/** Texto para mostrar de un estado guardado sin tilde en la base. */
+export function etiquetaEstado(estado: string): string {
+  return estado === 'En revision' ? 'En revisión' : estado
+}
 
 /** Lo que devuelve fn_generar_facturas. */
 export interface ResumenGeneracion {
@@ -144,7 +150,9 @@ export function mensajeErrorFacturacion(error: {
     case 'FAC_SOLO_GENERADOR':
       return 'Las facturas solo se crean con "Generar facturas".'
     case 'CUO_PAGADA':
-      return 'La cuota ya está pagada: no puede volver a pendiente ni cambiar su importe.'
+      return 'La cuota ya está pagada: no puede volver a pendiente ni cambiar su importe, su fecha de pago ni su método.'
+    case 'CUO_EN_REVISION':
+      return 'La cuota tiene un comprobante de transferencia en revisión. Aprobalo o rechazalo en Comprobantes antes de registrar otro pago.'
     case 'CUO_FACTURADA':
       return 'La cuota ya está facturada: no se puede cambiar su alumno, período, vencimiento ni importe.'
     case 'CUO_METODO':
@@ -169,7 +177,13 @@ export function colorEstadoCobro(estado: string): string {
   switch (estado) {
     case 'Pagada':
     case 'Pagado':
+    case 'Aprobado':
       return '#27AE60'
+    case 'En revision':
+    case 'En revisión':
+      return '#8E44AD'
+    case 'Rechazado':
+      return '#E74C3C'
     case 'Parcial':
       return '#2980B9'
     case 'Vencida':

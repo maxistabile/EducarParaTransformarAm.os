@@ -8,6 +8,7 @@ import { ServicioAuth } from '../../servicios/ServicioAuth'
 import { MENSAJES_ACCESO } from '../reglasAuthApp'
 import type { EstadoSesion, Resultado } from '../reglasAuthApp'
 import { ContextoSesion } from './contextoSesion'
+import { borrarIntentos } from './intentoPago'
 import { borrarSelecciones } from './seleccionAlumno'
 
 export default function ProveedorSesion({ children }: { children: ReactNode }) {
@@ -50,6 +51,7 @@ export default function ProveedorSesion({ children }: { children: ReactNode }) {
           // También se olvida el alumno elegido de la cuenta anterior.
           turno.current++
           borrarSelecciones()
+          borrarIntentos()
           setSesion((prev) =>
             prev.estado === 'sin-sesion' ? prev : { estado: 'sin-sesion', aviso: null },
           )
@@ -65,6 +67,7 @@ export default function ProveedorSesion({ children }: { children: ReactNode }) {
     const resultado = await ServicioAuth.cerrarSesion()
     if (resultado.ok) {
       borrarSelecciones()
+      borrarIntentos()
       setSesion({ estado: 'sin-sesion', aviso: null })
     } else validar(false)
     return resultado

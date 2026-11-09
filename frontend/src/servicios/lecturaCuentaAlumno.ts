@@ -1,16 +1,17 @@
 // ═══════════════════════════════════════════════════════════════
 //  Lectura de la cuenta de un alumno (la usan ServicioCuotas y
-//  ServicioPagos; HU51 a HU53)
+//  ServicioPagos; HU51 a HU56)
 // ═══════════════════════════════════════════════════════════════
-// Tres consultas, todas filtradas por el mismo alumno (también la que
+// Cuatro consultas, todas filtradas por el mismo alumno (también la que
 // busca qué cuotas ya están dentro de una factura):
-//   - v_facturas_saldo y v_factura_items_saldo (contrato de etapa17);
+//   - v_facturas_saldo y v_factura_items_saldo (etapa17 y etapa18);
 //   - cuotas, para las heredadas sin factura y la fecha y el método de
-//     los pagos registrados por la administración.
+//     los pagos registrados por la administración;
+//   - pagos con sus pago_items: los comprobantes cargados (etapa18).
 // Antes de consultar exige rol Padre y un alumno de la sesión (los que
 // devolvió ServicioAlumnosApp). Sin RLS (CLAUDE.md 3.1): este filtro no
-// impide consultas directas a la API. La tabla pagos no se lee: su
-// reutilización se decide en HU54/HU55.
+// impide consultas directas a la API. Los archivos no se leen acá: solo
+// la Edge Function "pagos" entrega URLs firmadas.
 import { supabase } from '../lib/supabase'
 import { resumenError } from '../app/reglasContrasena'
 import type { RolApp } from '../app/reglasAuthApp'
@@ -18,6 +19,7 @@ import type {
   FilaCuota,
   FilaFacturaSaldo,
   FilaItemSaldo,
+  FilaPago,
   LecturaCuenta,
 } from '../app/reglasCuentaAlumno'
 
@@ -53,14 +55,14 @@ export function leerCuentaAlumno(
   return Promise.all([
     supabase
       .from('v_facturas_saldo')
-      .select('id_factura, anio, mes, fecha_emision, fecha_vencimiento, total, cobrado, saldo, estado_cobro')
+      .select('id_factura, anio, mes, fecha_emision, fecha_vencimiento, total, cobrado, saldo, estado_cobro, en_revision')
       .eq('id_alumno', idAlumno)
       .order('anio')
       .order('mes'),
     supabase
       .from('v_factura_items_saldo')
       .select(
-        'id_item, id_factura, anio, mes, concepto, id_cuota, descripcion, porcentaje_beca, neto, cubierta_por_beca, estado_pago, fecha_pago, saldo',
+        'id_item, id_factura, anio, mes, concepto, id_cuota, descripcion, porcentaje_beca, neto, cubierta_por_beca, estado_pago, fecha_pago, saldo, id_pago',
       )
       .eq('id_alumno', idAlumno)
       .order('id_item'),
@@ -72,9 +74,17 @@ export function leerCuentaAlumno(
       .eq('id_alumno', idAlumno)
       .order('anio')
       .order('mes'),
+    supabase
+      .from('pagos')
+      .select(
+        'id_pago, id_factura, estado, monto_pagado, fecha_pago, fecha_revision, motivo_rechazo, pago_items(id_item, importe, activo)',
+      )
+      .eq('id_alumno', idAlumno)
+      .not('id_factura', 'is', null)
+      .order('id_pago'),
   ]).then(
-    ([fac, ite, cuo]): ResultadoLectura => {
-      const error = fac.error ?? ite.error ?? cuo.error
+    ([fac, ite, cuo, pag]): ResultadoLectura => {
+      const error = fac.error ?? ite.error ?? cuo.error ?? pag.error
       if (error) return fallo(error)
       return {
         ok: true,
@@ -82,6 +92,7 @@ export function leerCuentaAlumno(
           facturas: (fac.data ?? []) as unknown as FilaFacturaSaldo[],
           items: (ite.data ?? []) as unknown as FilaItemSaldo[],
           cuotas: (cuo.data ?? []) as unknown as FilaCuota[],
+          pagos: (pag.data ?? []) as unknown as FilaPago[],
         },
       }
     },
