@@ -20,6 +20,7 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa16_valores.sql` | TP Met. II · Parte 3 · RF11.1–RF11.4 (HU46–HU49) | Tabla `valores_servicio`: valores de cuota, cada deporte, cada recorrido y comedor, con fecha de vigencia. Un valor por concepto, referencia y fecha (corregir = reemplazar el de esa fecha). Sin RLS (decisión del equipo) |
 | `etapa17_facturacion.sql` | TP Met. II · Parte 3 · RF11.5 (HU50, **etapa A, parcial**) | Tablas `facturas` y `factura_items`, `fn_generar_facturas` (único generador de cuotas y facturas), protecciones, columna `cuotas.cubierta_por_beca` y vistas de saldo. Antes: `verificaciones/relevamiento_cuotas.sql` |
 | `etapa18_comprobantes.sql` | TP Met. II · Parte 3 · RF12.4–RF12.6 (HU54–HU56) | Reutiliza `pagos` como comprobante de transferencia (+ tabla `pago_items`), bucket privado `pagos`, funciones solo para `service_role` (las usa la Edge Function `pagos`), protecciones, control en `fn_controlar_cuota`, vistas de saldo con "En revision" y `pagos` en Realtime. Antes: `verificaciones/relevamiento_etapa18.sql` |
+| `etapa19_validar_solicitud_concurrente.sql` | TP Met. II · Parte 3 · corrección de HU54 | `fn_validar_solicitud`: dos envíos simultáneos con la misma clave devuelven el mismo comprobante (antes, el gemelo podía recibir `PAG_ITEM_NO_DISPONIBLE`). Requiere `etapa18`; no hace falta volver a ejecutarla |
 
 ## Etapa 17 — Facturación (HU50, etapa A)
 
@@ -150,6 +151,43 @@ bloqueo mutuo). Sin el bloqueo de la cuota, dos de esos casos fallan.
 *Ejecutado por el equipo en Supabase el 09/11 (informado por el equipo):*
 relevamiento compatible, `etapa18` con todos los controles en `OK` y RLS
 `INACTIVO`, y `pruebas_etapa18` con `PRUEBAS_ETAPA18_OK|16 controles`.
+
+## Etapa 19 — Envíos simultáneos con la misma clave (corrección de HU54)
+
+Orden (lo ejecuta el equipo; la IA no corre SQL en Supabase):
+
+1. **`etapa19_validar_solicitud_concurrente.sql`**. Requiere `etapa18` ya
+   ejecutada (si no, corta con `ETAPA19_REQUIERE_ETAPA18` sin aplicar nada).
+   Solo reemplaza `fn_validar_solicitud` y vuelve a dejar sus permisos. Al
+   final muestra una tabla: todo `OK` y RLS `INACTIVO`.
+2. **`verificaciones/pruebas_etapa18.sql`** otra vez, como regresión: tiene
+   que seguir dando `PRUEBAS_ETAPA18_OK|16 controles`.
+
+No hace falta volver a publicar la Edge Function `pagos`: no cambia.
+
+Qué corrige: `fn_validar_solicitud` lee la clave y después, en otra
+sentencia, valida los ítems. Con READ COMMITTED cada sentencia ve su
+propia instantánea: si un envío gemelo (misma clave, usuario y huella) se
+confirmaba entre las dos lecturas, la clave no aparecía pero los ítems ya
+figuraban En revisión, y el gemelo recibía `PAG_ITEM_NO_DISPONIBLE`. Ahora,
+ante ese error, se vuelve a leer **solo la clave, una vez**:
+- misma clave, usuario y huella → el comprobante existente;
+- misma clave con otra huella u otro usuario → `PAG_CLAVE_REUSADA`;
+- clave inexistente → el mismo `PAG_ITEM_NO_DISPONIBLE` (otra clave reservó
+  el ítem: conflicto real).
+
+No cambian la identidad, la pertenencia, la huella, los bloqueos
+(`fn_registrar_comprobante` sigue bloqueando factura → cuotas), los
+permisos (solo `service_role`, `search_path` fijo) ni RLS.
+
+*Verificado por la IA el 09/11 (no en Supabase):* prueba concurrente con
+sesiones reales en PostgreSQL 17.6 local y coordinación explícita (un
+advisory lock detiene a la segunda sesión justo después de leer la clave,
+confirmado en `pg_locks`). Sin `etapa19` falla (el gemelo recibe
+`PAG_ITEM_NO_DISPONIBLE`); con `etapa19` pasa, y siguen bien la clave con
+otra huella, las claves distintas sobre el mismo ítem y las regresiones
+(concurrencia 10 de 10, `pruebas_etapa18` 16 de 16, `pruebas_etapa17` 12
+de 12 y la Edge Function 13 de 13).
 
 ## Pasos manuales adicionales
 
