@@ -7,12 +7,13 @@ import { useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from './AppLayout'
 import AvisoActualizacion from './AvisoActualizacion'
+import Cuotas from './pantallas/Cuotas'
 import Ingresar from './pantallas/Ingresar'
 import Inscripciones from './pantallas/Inscripciones'
 import Inicio from './pantallas/Inicio'
 import NuevaContrasena from './pantallas/NuevaContrasena'
+import Pagos from './pantallas/Pagos'
 import Perfil from './pantallas/Perfil'
-import Proximamente from './pantallas/Proximamente'
 import Recuperar from './pantallas/Recuperar'
 import ProveedorSesion from './sesion/ProveedorSesion'
 import { RutaProtegida, RutaSeccion } from './sesion/RutasProtegidas'
@@ -61,10 +62,9 @@ export default function AppRoutes() {
   // El service worker y el manifiesto usan el scope /app/ (con barra)
   if (pathname === '/app') return <Navigate to='/app/' replace />
 
-  // Inscripciones (HU59) ya consulta datos. Cuotas y pagos siguen como
-  // "Próximamente" hasta sus historias (HU51 a HU53). Sin RLS, por
-  // decisión del equipo (CLAUDE.md 3.1): los filtros por usuario están en
-  // los servicios.
+  // Cuotas y Pagos (HU51 a HU53, solo el padre) e Inscripciones (HU59)
+  // consultan datos. Sin RLS, por decisión del equipo (CLAUDE.md 3.1): los
+  // filtros por usuario y por rol están en los servicios.
   return (
     <ProveedorSesion>
       <Routes>
@@ -78,7 +78,7 @@ export default function AppRoutes() {
               path='cuotas'
               element={
                 <RutaSeccion seccion='cuotas'>
-                  <Proximamente titulo='Cuotas' />
+                  <Cuotas />
                 </RutaSeccion>
               }
             />
@@ -86,7 +86,7 @@ export default function AppRoutes() {
               path='pagos'
               element={
                 <RutaSeccion seccion='pagos'>
-                  <Proximamente titulo='Pagos' />
+                  <Pagos />
                 </RutaSeccion>
               }
             />
