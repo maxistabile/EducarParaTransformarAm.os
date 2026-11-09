@@ -53,10 +53,10 @@ function codigoDe(cuerpo: unknown): { codigo: string; detalle: string } | null {
 async function leerCuerpoError(respuesta: Response): Promise<unknown> {
   try {
     return (await respuesta.json()) as unknown
-  } catch (causa) {
+  } catch (error) {
     console.error('[ServicioPagos] cuerpo de error sin JSON:', {
       status: respuesta.status,
-      ...resumenError(causa),
+      ...resumenError(error),
     })
     return null
   }

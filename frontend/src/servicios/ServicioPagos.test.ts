@@ -138,7 +138,7 @@ describe('registrarComprobante (HU54)', () => {
   it('un error HTTP sin JSON: 401 es sesión vencida; otro estado, error reintentable', async () => {
     estado.respuesta = { data: null, error: http(401, 'Invalid JWT') }
     expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_SIN_SESION', reintentable: false })
-    estado.respuesta = { data: null, error: http(500, '<html>error</html>') }
+    estado.respuesta = { data: null, error: http(500, 'Internal Server Error') }
     expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
     estado.respuesta = { data: null, error: http(500, JSON.stringify({ code: 500 })) }
     expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
@@ -265,7 +265,9 @@ describe('escucharCambios (Observer, Realtime)', () => {
   it('si quitar el canal falla, se registra sin rechazar', async () => {
     estado.quitarFalla = true
     const cortar = ServicioPagos.escucharCambios({ idAlumno: 7 }, () => {})
-    expect(() => cortar()).not.toThrow()
+    expect(() => {
+      cortar()
+    }).not.toThrow()
     await new Promise((listo) => setTimeout(listo, 0))
     expect(estado.quitados).toBe(1)
     expect(console.error).toHaveBeenCalledWith('[ServicioPagos] quitar canal:', expect.objectContaining({ nombre: 'Error' }))

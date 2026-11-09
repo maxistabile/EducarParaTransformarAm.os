@@ -85,7 +85,9 @@ describe('intento guardado por cuenta y factura (sessionStorage)', () => {
       get length() {
         return datos.size
       },
-      clear: () => datos.clear(),
+      clear: () => {
+        datos.clear()
+      },
     } as Storage
   })
   afterEach(() => {
