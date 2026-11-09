@@ -191,7 +191,7 @@ Cada paso es un PR (o pocos). Priorizar que el flujo **"consultar cuota → paga
 3. **etapa16 en adelante (SQL), en scripts separados por bloque:** ✅ valores (`etapa16`); facturas, ítems y corrección de `'Efectivo'` (`etapa17`, HU50 etapa A); faltan comprobantes, envíos y bucket privado.
 4. ✅ **HU46–HU49:** valores en `gestion/GestionValores.tsx`, para Admin y Directivo (PR #27).
 5. **HU50:** facturación, **parcial**. Etapa A: `fn_generar_facturas` (invocable a mano o desde la sección Facturación), único generador de cuotas y facturas; la cuota del período es el ítem Cuota de su factura; el saldo se lee de `v_facturas_saldo` y `v_factura_items_saldo` (contrato para HU51 a HU56). Etapa B, pendiente: último día hábil con feriados, pg_cron y PDF bajo demanda reutilizable por HU60.
-6. **HU51–HU53 y HU59:** consultas del padre/alumno en la app.
+6. **HU51–HU53 y HU59:** consultas del padre/alumno en la app. HU59 en `feat/HU59-inscripciones-app` (`ServicioAlumnosApp`, selector de alumno e inscripciones de solo lectura). HU51 a HU53 en un segundo PR: cuotas heredadas sin factura aparte, HU52 parcial hasta HU56, HU53 solo con pagos administrativos y los conceptos cubiertos por beca como "Sin cargo".
 7. **HU54 → HU55 → HU56:** carga de comprobante, aprobación en la web (con Realtime) y comprobante PDF.
 8. **HU57 y HU58:** facturas por período y deuda por ítem.
 9. **HU60 y HU61:** correos programados, reutilizando `enviar-notificacion` / Resend. Probar con **fechas simuladas** (parámetro de fecha) y `EMAIL_ALLOWLIST`.
@@ -247,6 +247,10 @@ El plan define la bitácora como una **planilla compartida en Google Drive** que
 - 25 vulnerabilidades informadas por `npm audit` al 05/11/2026 (4 bajas, 13 moderadas y 8 altas), pendientes de revisión en la Issue #21. No correr `audit fix` sin probar.
 - `supabase/functions/crear-usuario/index.ts` está casi entero comentado en el repo (55 de 65 líneas), así que no coincide con una función que esté funcionando. **No redesplegarla desde ese archivo:** `DEPLOY_MANUAL.md` indica copiarlo tal cual y eso podría romper el alta de usuarios. Antes hay que comparar el repo con lo desplegado.
 - El alta de alumnos usa el DNI como contraseña (`AdminPanel.tsx`), que puede tener 7 dígitos. Subir a 8 la longitud mínima global de Supabase Auth podría romper esas altas: revisarlo antes de cambiar ese ajuste.
+
+- **Pendientes detectados en el recorrido de HU59 (08/11/2026), sin HU asignada y sin implementar:**
+  - Al crear un alumno desde Alumnos no se crea su cuenta, y después no hay un flujo para vincularle un usuario. Evaluar una solución mínima que conserve el legajo y evite duplicar cuentas.
+  - Admin, Directivo y Docente acceden bien a la web de gestión, pero su presentación en celular necesita revisión. Esos roles siguen fuera de la PWA; evaluar ajustes concretos de compatibilidad móvil.
 
 ---
 
