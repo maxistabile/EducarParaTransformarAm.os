@@ -53,10 +53,11 @@ function codigoDe(cuerpo: unknown): { codigo: string; detalle: string } | null {
 async function leerCuerpoError(respuesta: Response): Promise<unknown> {
   try {
     return (await respuesta.json()) as unknown
-  } catch (error) {
+  } catch (causa) {
+    // El estado HTTP va después: resumenError trae status undefined y lo pisaba
     console.error('[ServicioPagos] cuerpo de error sin JSON:', {
+      ...resumenError(causa),
       status: respuesta.status,
-      ...resumenError(error),
     })
     return null
   }

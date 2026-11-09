@@ -18,8 +18,7 @@ describe('validarUrlDocumento', () => {
 
   it('rechaza javascript:, data: y otros esquemas', () => {
     expect(validarUrlDocumento('javascript:alert(1)', SUPABASE)).toBeNull()
-    // data: con contenido en base64 (un script), sin HTML literal en la prueba
-    expect(validarUrlDocumento('data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==', SUPABASE)).toBeNull()
+    expect(validarUrlDocumento('data:text/html,<script>alert(1)</script>', SUPABASE)).toBeNull()
     expect(validarUrlDocumento(VALIDA.replace('https:', 'http:'), SUPABASE)).toBeNull()
   })
 

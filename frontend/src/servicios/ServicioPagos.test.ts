@@ -138,11 +138,30 @@ describe('registrarComprobante (HU54)', () => {
   it('un error HTTP sin JSON: 401 es sesión vencida; otro estado, error reintentable', async () => {
     estado.respuesta = { data: null, error: http(401, 'Invalid JWT') }
     expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_SIN_SESION', reintentable: false })
-    estado.respuesta = { data: null, error: http(500, 'Internal Server Error') }
+    estado.respuesta = { data: null, error: http(500, '<html>error</html>') }
     expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
     estado.respuesta = { data: null, error: http(500, JSON.stringify({ code: 500 })) }
     expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
     expect(console.error).toHaveBeenCalled()
+  })
+
+  it('leerCuerpoError: si json() rechaza (JSON inválido o cuerpo ya leído), registra y devuelve un Fallo', async () => {
+    // JSON inválido: json() rechaza con SyntaxError
+    estado.respuesta = { data: null, error: http(503, '{"codigo":') }
+    await expect(enviar()).resolves.toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
+    expect(console.error).toHaveBeenCalledWith(
+      '[ServicioPagos] cuerpo de error sin JSON:',
+      expect.objectContaining({ status: 503, nombre: 'SyntaxError' }),
+    )
+    // Cuerpo ya consumido: json() rechaza con TypeError, aunque fuera JSON válido
+    const usada = new Response(JSON.stringify({ ok: false, codigo: 'PAG_SIN_PERMISO' }), { status: 403 })
+    await usada.text()
+    estado.respuesta = { data: null, error: new FunctionsHttpError(usada) }
+    await expect(enviar()).resolves.toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
+    expect(console.error).toHaveBeenCalledWith(
+      '[ServicioPagos] cuerpo de error sin JSON:',
+      expect.objectContaining({ status: 403, nombre: 'TypeError' }),
+    )
   })
 
   it('sin respuesta (red) es reintentable con la misma clave y no rechaza', async () => {
