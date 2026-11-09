@@ -21,6 +21,8 @@
 //   revisar      {id_pago, aprobar, motivo}  Admin o Directivo. Si aprueba,
 //                                   intenta generar el comprobante PDF.
 //   recibo       {id_pago}          Genera (si falta) y firma el comprobante PDF.
+//   factura      {id_factura}       Genera (si falta) y firma el PDF de la FACTURA
+//                                   (HU57; padre actual, Admin o Directivo).
 //
 // Respuesta: { ok: true, ... } o { ok: false, codigo, detalle? }. Los
 // códigos (PAG_..., CUO_...) los traduce el frontend.
@@ -271,6 +273,128 @@ async function asegurarRecibo(db: SupabaseClient, usuario: string, idPago: numbe
   return await rpc<string>(db, 'fn_guardar_recibo', { p_id_pago: idPago, p_path: ruta })
 }
 
+// ── HU57 (y HU50, parte del PDF): factura del período en PDF ──
+// Reutilizable por los correos de HU60: asegurarFacturaPdf devuelve la
+// ruta del PDF (lo genera una sola vez). La factura emitida no se toca:
+// la ruta es fija (facturas/<id>.pdf) y no se guarda en la base.
+interface ItemFactura {
+  concepto: string
+  descripcion: string
+  importe: number
+  descuento: number
+  porcentaje_beca: number | null
+  neto: number
+}
+
+interface DatosFactura {
+  id_factura: number
+  anio: number
+  mes: number
+  alumno: string
+  dni: string | null
+  curso: string | null
+  fecha_emision: string
+  fecha_vencimiento: string
+  total: number
+  items: ItemFactura[]
+}
+
+/** 'AAAA-MM-DD' → 'DD/MM/AAAA', sin pasar por zonas horarias. */
+const fechaDia = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/')
+
+/**
+ * PDF de la FACTURA, solo con datos históricos (copiados al emitir): se
+ * distingue del comprobante de pago por el título, el prefijo (F- / R-) y
+ * la aclaración de que no acredita pagos. Regenerarlo da el mismo contenido.
+ */
+async function crearPdfFactura(d: DatosFactura): Promise<Uint8Array> {
+  const emision = new Date(`${d.fecha_emision.slice(0, 10)}T12:00:00Z`)
+  const doc = await PDFDocument.create()
+  doc.setTitle(`Factura ${numero('F', d.id_factura)}`)
+  doc.setAuthor('Educar para Transformar')
+  doc.setProducer('Educar para Transformar')
+  doc.setCreator('Educar para Transformar')
+  doc.setCreationDate(emision)
+  doc.setModificationDate(emision)
+  const pagina = doc.addPage([595, 842])
+  const normal = await doc.embedFont(StandardFonts.Helvetica)
+  const negrita = await doc.embedFont(StandardFonts.HelveticaBold)
+  const violeta = rgb(0x5b / 255, 0x35 / 255, 0xc5 / 255)
+  const oscuro = rgb(0.1, 0.1, 0.18)
+  let y = 790
+  const texto = (t: string, x: number, tam = 11, fuente = normal, color = oscuro) =>
+    pagina.drawText(t, { x, y, size: tam, font: fuente, color })
+  const derecha = (t: string, xDer: number, tam = 11, fuente = normal) =>
+    pagina.drawText(t, { x: xDer - fuente.widthOfTextAtSize(t, tam), y, size: tam, font: fuente, color: oscuro })
+  const linea = () =>
+    pagina.drawLine({ start: { x: 50, y }, end: { x: 545, y }, thickness: 0.5, color: violeta })
+
+  // Encabezado con franja de color: a simple vista no es el comprobante de pago
+  pagina.drawRectangle({ x: 0, y: 760, width: 595, height: 82, color: violeta })
+  y = 808
+  const nro = numero('F', d.id_factura)
+  texto('FACTURA', 50, 24, negrita, rgb(1, 1, 1))
+  texto(nro, 545 - negrita.widthOfTextAtSize(nro, 16), 16, negrita, rgb(1, 1, 1))
+  y = 784
+  texto('Educar para Transformar', 50, 12, normal, rgb(1, 1, 1))
+  y = 730
+
+  const periodo = `${MESES.at(d.mes - 1) ?? '?'} ${d.anio}`
+  texto(`Período: ${periodo}`, 50, 12, negrita); y -= 18
+  texto(`Fecha de emisión: ${fechaDia(d.fecha_emision)}`, 50); y -= 16
+  texto(`Vencimiento: ${fechaDia(d.fecha_vencimiento)}`, 50, 11, negrita); y -= 28
+
+  texto(`Alumno/a: ${d.alumno}`, 50); y -= 16
+  if (d.dni) { texto(`DNI: ${d.dni}`, 50); y -= 16 }
+  if (d.curso) { texto(`Curso: ${d.curso}`, 50); y -= 16 }
+  y -= 14
+
+  texto('Concepto', 50, 10, negrita)
+  derecha('Importe', 370, 10, negrita)
+  derecha('Beca / descuento', 465, 10, negrita)
+  derecha('A pagar', 545, 10, negrita)
+  y -= 8; linea(); y -= 16
+  for (const it of d.items) {
+    texto(it.descripcion, 50, 10)
+    derecha(pesos(Number(it.importe)), 370, 10)
+    const beca = it.porcentaje_beca === null ? '' : `${Number(it.porcentaje_beca)} % `
+    derecha(Number(it.descuento) > 0 ? `${beca}- ${pesos(Number(it.descuento))}` : '-', 465, 10)
+    derecha(pesos(Number(it.neto)), 545, 10)
+    y -= 16
+  }
+  y -= 4; linea(); y -= 20
+  texto('Total a pagar', 50, 13, negrita); derecha(pesos(Number(d.total)), 545, 13, negrita); y -= 34
+
+  texto('Pago por transferencia bancaria. Después de transferir, cargá el comprobante en la app.', 50, 9)
+  y -= 12
+  texto('Esta factura informa el importe del período y NO acredita pagos: cada pago aprobado', 50, 9)
+  y -= 12
+  texto('tiene su propio comprobante de pago (número R-...).', 50, 9)
+  return await doc.save()
+}
+
+/** Genera el PDF de la factura si falta (ruta fija, sin upsert) y devuelve su ruta. */
+async function asegurarFacturaPdf(db: SupabaseClient, usuario: string, idFactura: number): Promise<string> {
+  // Identidad, rol y pertenencia actual se controlan en la base, en cada llamada
+  const datos = await rpc<DatosFactura>(db, 'fn_datos_factura', { p_usuario: usuario, p_id_factura: idFactura })
+  const nombre = `${idFactura}.pdf`
+  const ruta = `facturas/${nombre}`
+  const { data } = await db.storage.from(BUCKET).list('facturas', { search: nombre })
+  if (data?.some((o) => o.name === nombre)) return ruta
+  const pdf = await crearPdfFactura(datos)
+  const subida = await db.storage.from(BUCKET).upload(ruta, pdf, {
+    contentType: 'application/pdf',
+    upsert: false,
+  })
+  // Si ya existe (generación simultánea), se usa ese: el contenido es el mismo
+  const existe = subida.error && /exist|duplicate/i.test(subida.error.message ?? '')
+  if (subida.error && !existe) {
+    console.error('[pagos] factura:', { status: (subida.error as { statusCode?: string }).statusCode })
+    throw new ErrorPago('PAG_FACTURA_PENDIENTE', '', 502)
+  }
+  return ruta
+}
+
 async function urlFirmada(db: SupabaseClient, ruta: string): Promise<string> {
   const { data, error } = await db.storage.from(BUCKET).createSignedUrl(ruta, 60)
   if (error || !data) throw new ErrorPago('PAG_ARCHIVO_NO_DISPONIBLE', '', 502)
@@ -335,6 +459,13 @@ Deno.serve(async (req) => {
       case 'recibo': {
         if (!Number.isInteger(idPago)) throw new ErrorPago('PAG_SOLICITUD_INVALIDA', '', 400)
         const ruta = await asegurarRecibo(db, usuario, idPago)
+        return responder({ ok: true, url: await urlFirmada(db, ruta) })
+      }
+      case 'factura': {
+        const idFactura = Number(cuerpo.id_factura)
+        if (!Number.isInteger(idFactura) || idFactura <= 0)
+          throw new ErrorPago('PAG_SOLICITUD_INVALIDA', '', 400)
+        const ruta = await asegurarFacturaPdf(db, usuario, idFactura)
         return responder({ ok: true, url: await urlFirmada(db, ruta) })
       }
       default:

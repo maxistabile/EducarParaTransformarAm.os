@@ -123,6 +123,13 @@ Con la CLI (si se instala): `supabase functions deploy pagos`.
 - `recibo`: genera (si falta) el PDF en `recibos/{id_pago}.pdf`, sin upsert,
   con datos históricos (factura, ítems del pago, importes y fecha de
   aprobación), y devuelve una URL firmada de 60 s.
+- `factura` (HU57; padre actual, Admin o Directivo): genera (si falta) el PDF
+  de la **factura** en `facturas/{id_factura}.pdf`, sin upsert, con los datos
+  históricos de `fn_datos_factura` (`etapa20`), y devuelve una URL firmada de
+  60 s. No escribe en la base. Se distingue del comprobante de pago por el
+  título, el número (`F-` frente a `R-`) y la aclaración de que no acredita
+  pagos. Los correos de HU60 pueden reutilizar `asegurarFacturaPdf`.
+  Requiere ejecutar `etapa20` antes de publicar esta versión.
 
 Los errores llegan como `{ ok: false, codigo }` (`PAG_...`, `CUO_...`) y la
 app los traduce. En los logs solo se registran códigos, nunca datos.
