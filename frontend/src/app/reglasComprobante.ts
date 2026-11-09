@@ -29,34 +29,46 @@ export function validarArchivo(archivo: DatosArchivo | null): string | null {
   return null
 }
 
-const MENSAJES: Record<string, string> = {
-  PAG_SIN_SESION: 'Tu sesión venció. Volvé a iniciar sesión.',
-  PAG_SIN_PERMISO: 'No tenés permiso para esta operación.',
-  PAG_FACTURA_AJENA: 'Esa factura no corresponde a un hijo asociado a tu cuenta.',
-  PAG_ITEM_AJENO: 'Elegiste un concepto que no es de esta factura.',
-  PAG_ITEMS_REPETIDOS: 'Elegiste un concepto más de una vez.',
-  PAG_SIN_ITEMS: 'Elegí al menos un concepto para pagar.',
-  PAG_ITEM_NO_DISPONIBLE:
+const MENSAJE_GENERICO = 'Ocurrió un error inesperado. Intentá de nuevo.'
+
+// Map y no un objeto literal: un código desconocido, '__proto__' o
+// 'constructor' no encuentra nada heredado y cae en el mensaje genérico.
+const MENSAJES: ReadonlyMap<string, string> = new Map([
+  ['PAG_SIN_SESION', 'Tu sesión venció. Volvé a iniciar sesión.'],
+  ['PAG_SIN_PERMISO', 'No tenés permiso para esta operación.'],
+  ['PAG_FACTURA_AJENA', 'Esa factura no corresponde a un hijo asociado a tu cuenta.'],
+  ['PAG_ITEM_AJENO', 'Elegiste un concepto que no es de esta factura.'],
+  ['PAG_ITEMS_REPETIDOS', 'Elegiste un concepto más de una vez.'],
+  ['PAG_SIN_ITEMS', 'Elegí al menos un concepto para pagar.'],
+  [
+    'PAG_ITEM_NO_DISPONIBLE',
     'Uno de los conceptos ya está pagado o tiene un comprobante en revisión. Actualizá la pantalla.',
-  PAG_CLAVE_REUSADA:
+  ],
+  [
+    'PAG_CLAVE_REUSADA',
     'Este envío no coincide con uno anterior. Volvé a elegir los conceptos y el archivo.',
-  PAG_SOLICITUD_INVALIDA: 'La solicitud no es válida. Actualizá la pantalla e intentá de nuevo.',
-  PAG_ARCHIVO_VACIO: 'El archivo está vacío.',
-  PAG_ARCHIVO_GRANDE: 'El archivo supera los 5 MB.',
-  PAG_ARCHIVO_TIPO: 'El archivo no es un JPG, PNG o PDF válido.',
-  PAG_SUBIDA: 'No pudimos guardar el archivo. Intentá de nuevo: no se va a duplicar.',
-  PAG_NO_EXISTE: 'El comprobante no existe.',
-  PAG_YA_REVISADO: 'El comprobante ya fue revisado por otra persona. Actualizá la lista.',
-  PAG_MOTIVO: 'Para rechazar, escribí un motivo de al menos 5 caracteres.',
-  PAG_ITEM_YA_PAGADO:
+  ],
+  ['PAG_SOLICITUD_INVALIDA', 'La solicitud no es válida. Actualizá la pantalla e intentá de nuevo.'],
+  ['PAG_ARCHIVO_VACIO', 'El archivo está vacío.'],
+  ['PAG_ARCHIVO_GRANDE', 'El archivo supera los 5 MB.'],
+  ['PAG_ARCHIVO_TIPO', 'El archivo no es un JPG, PNG o PDF válido.'],
+  ['PAG_SUBIDA', 'No pudimos guardar el archivo. Intentá de nuevo: no se va a duplicar.'],
+  ['PAG_NO_EXISTE', 'El comprobante no existe.'],
+  ['PAG_YA_REVISADO', 'El comprobante ya fue revisado por otra persona. Actualizá la lista.'],
+  ['PAG_MOTIVO', 'Para rechazar, escribí un motivo de al menos 5 caracteres.'],
+  [
+    'PAG_ITEM_YA_PAGADO',
     'Uno de los conceptos ya figura pagado. Rechazá el comprobante indicando el motivo.',
-  PAG_SIN_RECIBO: 'El comprobante de pago se emite solo para pagos aprobados.',
-  PAG_RECIBO_PENDIENTE:
+  ],
+  ['PAG_SIN_RECIBO', 'El comprobante de pago se emite solo para pagos aprobados.'],
+  [
+    'PAG_RECIBO_PENDIENTE',
     'No pudimos generar el comprobante de pago. Intentá de nuevo en unos minutos.',
-  PAG_ARCHIVO_NO_DISPONIBLE: 'No pudimos abrir el archivo. Intentá de nuevo.',
-  PAG_RED: 'No pudimos comunicarnos con el servidor. Revisá tu conexión e intentá de nuevo.',
-  PAG_ERROR: 'Ocurrió un error inesperado. Intentá de nuevo.',
-}
+  ],
+  ['PAG_ARCHIVO_NO_DISPONIBLE', 'No pudimos abrir el archivo. Intentá de nuevo.'],
+  ['PAG_RED', 'No pudimos comunicarnos con el servidor. Revisá tu conexión e intentá de nuevo.'],
+  ['PAG_ERROR', MENSAJE_GENERICO],
+])
 
 /** Texto para un código de la Edge Function o de la base. */
 export function mensajePago(codigo: string, detalle = ''): string {
@@ -64,7 +76,7 @@ export function mensajePago(codigo: string, detalle = ''): string {
     return `"${detalle}" ya está pagado o tiene un comprobante en revisión. Actualizá la pantalla.`
   if (codigo === 'PAG_ITEM_YA_PAGADO' && detalle)
     return `"${detalle}" ya figura pagado. Rechazá el comprobante indicando el motivo.`
-  return MENSAJES[codigo] ?? MENSAJES.PAG_ERROR
+  return MENSAJES.get(codigo) ?? MENSAJE_GENERICO
 }
 
 /**

@@ -32,6 +32,13 @@ describe('mensajes y reintentos', () => {
     expect(mensajePago('CODIGO_DESCONOCIDO')).toMatch(/error inesperado/)
   })
 
+  it('un código desconocido o heredado de Object da el mensaje genérico, siempre texto', () => {
+    const generico = 'Ocurrió un error inesperado. Intentá de nuevo.'
+    for (const codigo of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'valueOf', '', 'PAG_X'])
+      expect(mensajePago(codigo)).toBe(generico)
+    expect(mensajePago('PAG_ERROR')).toBe(generico)
+  })
+
   it('solo se reintenta (con la misma clave) cuando el envío pudo haber llegado o no', () => {
     expect(esReintentable('PAG_RED')).toBe(true)
     expect(esReintentable('PAG_ERROR')).toBe(true)

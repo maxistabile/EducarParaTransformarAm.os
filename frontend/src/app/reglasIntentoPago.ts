@@ -60,11 +60,11 @@ export function mismaSolicitud(
   items: readonly number[],
   archivo: ArchivoIntento,
 ): boolean {
-  const a = ordenados(intento.items)
-  const b = ordenados(items)
+  // Los ítems son enteros positivos (leerIntento y el formulario lo
+  // garantizan): ordenados y unidos con coma, dos listas dan el mismo texto
+  // solo si tienen los mismos ítems, en cualquier orden.
   return (
-    a.length === b.length &&
-    a.every((x, i) => x === b[i]) &&
+    ordenados(intento.items).join(',') === ordenados(items).join(',') &&
     intento.archivo.sha256 === archivo.sha256 &&
     intento.archivo.tamanio === archivo.tamanio
   )

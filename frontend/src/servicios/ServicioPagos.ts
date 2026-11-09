@@ -10,6 +10,7 @@
 // se verifica la sesión y la base valida rol, pertenencia e importes
 // (etapa18). El navegador nunca manda importes ni rutas de archivos.
 // No rechaza: devuelve los datos o el código con su mensaje.
+import { FunctionsFetchError, FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { resumenError } from '../app/reglasContrasena'
 import type { RolApp } from '../app/reglasAuthApp'
@@ -32,27 +33,78 @@ const fallo = (codigo: string, detalle = ''): Fallo => ({
   reintentable: esReintentable(codigo),
 })
 
-type Respuesta = Record<string, unknown> & { ok?: boolean; codigo?: string; detalle?: string }
+type Respuesta = Record<string, unknown> & { ok: true }
 
-/** Llama a la Edge Function y normaliza la respuesta (sin rechazar). */
-async function invocar(body: FormData | Record<string, unknown>): Promise<Respuesta | Fallo> {
+const esObjeto = (x: unknown): x is Record<string, unknown> =>
+  typeof x === 'object' && x !== null && !Array.isArray(x)
+
+const texto = (x: unknown): string => (typeof x === 'string' ? x : '')
+
+/** Código y detalle de un cuerpo `{ ok: false, codigo, detalle }`, si lo es. */
+function codigoDe(cuerpo: unknown): { codigo: string; detalle: string } | null {
+  if (!esObjeto(cuerpo) || !texto(cuerpo.codigo)) return null
+  return { codigo: texto(cuerpo.codigo), detalle: texto(cuerpo.detalle) }
+}
+
+/**
+ * Lee el JSON de una respuesta HTTP de error. Si no es JSON (por ejemplo,
+ * el 401 de la puerta de enlace), lo registra y devuelve null.
+ */
+async function leerCuerpoError(respuesta: Response): Promise<unknown> {
   try {
-    const { data, error } = await supabase.functions.invoke('pagos', { body })
-    if (error) {
-      // Error HTTP: el cuerpo trae el código; sin cuerpo, es de red
-      const contexto = (error as { context?: { json?: () => Promise<unknown> } }).context
-      const cuerpo = (await contexto?.json?.().catch(() => null)) as Respuesta | null
-      if (cuerpo?.codigo) return fallo(cuerpo.codigo, cuerpo.detalle ?? '')
-      console.error('[ServicioPagos] invocar:', { nombre: (error as Error).name })
-      return fallo(contexto ? 'PAG_ERROR' : 'PAG_RED')
-    }
-    const r = (data ?? {}) as Respuesta
-    if (!r.ok) return fallo(r.codigo ?? 'PAG_ERROR', r.detalle ?? '')
-    return r
+    return (await respuesta.json()) as unknown
   } catch (causa) {
-    console.error('[ServicioPagos] invocar:', resumenError(causa))
+    console.error('[ServicioPagos] cuerpo de error sin JSON:', {
+      status: respuesta.status,
+      ...resumenError(causa),
+    })
+    return null
+  }
+}
+
+/**
+ * Error que devuelve `functions.invoke` → Fallo. supabase-js no rechaza:
+ * informa el problema en `error` con una de estas clases.
+ *   - FunctionsHttpError: la función respondió con un código HTTP de error;
+ *     el cuerpo trae el código de negocio. Sin código, un 401 es sesión
+ *     vencida (lo corta la verificación de JWT) y otro estado es un error.
+ *   - FunctionsFetchError: el pedido no llegó o la respuesta se perdió (red).
+ *   - FunctionsRelayError u otro: error del servidor.
+ */
+async function falloDeInvocacion(error: unknown): Promise<Fallo> {
+  if (error instanceof FunctionsHttpError && error.context instanceof Response) {
+    const cuerpo = codigoDe(await leerCuerpoError(error.context))
+    if (cuerpo) return fallo(cuerpo.codigo, cuerpo.detalle)
+    console.error('[ServicioPagos] HTTP sin código:', { status: error.context.status })
+    return fallo(error.context.status === 401 ? 'PAG_SIN_SESION' : 'PAG_ERROR')
+  }
+  console.error('[ServicioPagos] invocar:', resumenError(error))
+  return fallo(error instanceof FunctionsFetchError ? 'PAG_RED' : 'PAG_ERROR')
+}
+
+/**
+ * Llama a la Edge Function y normaliza la respuesta. No rechaza: devuelve
+ * la respuesta con `ok: true` o un Fallo con su código.
+ */
+async function invocar(body: FormData | Record<string, unknown>): Promise<Respuesta | Fallo> {
+  let resultado: Awaited<ReturnType<typeof supabase.functions.invoke>>
+  try {
+    resultado = await supabase.functions.invoke('pagos', { body })
+  } catch (causa) {
+    // invoke no debería rechazar; si lo hace, no hubo respuesta utilizable
+    console.error('[ServicioPagos] invocar rechazó:', resumenError(causa))
     return fallo('PAG_RED')
   }
+  const { data, error } = resultado
+  if (error) return falloDeInvocacion(error)
+  if (!esObjeto(data)) {
+    console.error('[ServicioPagos] respuesta inesperada:', { tipo: typeof data })
+    return fallo('PAG_ERROR')
+  }
+  if (data.ok === true) return { ...data, ok: true }
+  const cuerpo = codigoDe(data)
+  if (!cuerpo) console.error('[ServicioPagos] respuesta sin código')
+  return fallo(cuerpo?.codigo ?? 'PAG_ERROR', cuerpo?.detalle ?? '')
 }
 
 const esFallo = (r: Respuesta | Fallo): r is Fallo => r.ok === false
@@ -212,7 +264,8 @@ export const ServicioPagos = {
 
   /** Realtime (Observer): avisa cuando cambia un comprobante. */
   escucharCambios(filtro: { idAlumno?: number }, alCambiar: () => void): () => void {
-    const nombre = `pagos-${filtro.idAlumno ?? 'gestion'}-${Math.random().toString(36).slice(2)}`
+    // Nombre único por suscripción: dos pantallas abiertas no comparten canal
+    const nombre = `pagos-${filtro.idAlumno ?? 'gestion'}-${crypto.randomUUID()}`
     const canal = supabase
       .channel(nombre)
       .on(
@@ -229,7 +282,9 @@ export const ServicioPagos = {
       )
       .subscribe()
     return () => {
-      void supabase.removeChannel(canal)
+      supabase.removeChannel(canal).catch((causa: unknown) => {
+        console.error('[ServicioPagos] quitar canal:', resumenError(causa))
+      })
     }
   },
 }

@@ -38,7 +38,14 @@ describe('resolverIntento (HU54)', () => {
 
   it('mismaSolicitud no depende del orden de los ítems', () => {
     expect(mismaSolicitud(guardado, [31, 33], archivo)).toBe(true)
+    expect(mismaSolicitud(guardado, [33, 31], archivo)).toBe(true)
     expect(mismaSolicitud(guardado, [31, 33, 34], archivo)).toBe(false)
+    expect(mismaSolicitud(guardado, [31], archivo)).toBe(false)
+    expect(mismaSolicitud(guardado, [31, 34], archivo)).toBe(false)
+    expect(mismaSolicitud(guardado, [], archivo)).toBe(false)
+    // sin ambigüedad al unir: [3, 31] no es [1, 33]
+    expect(mismaSolicitud({ ...guardado, items: [3, 31] }, [1, 33], archivo)).toBe(false)
+    expect(mismaSolicitud(guardado, [31, 33], { ...archivo, tamanio: 999 })).toBe(false)
   })
 })
 
@@ -68,9 +75,13 @@ describe('intento guardado por cuenta y factura (sessionStorage)', () => {
     datos.clear()
     globalThis.sessionStorage = {
       getItem: (k: string) => datos.get(k) ?? null,
-      setItem: (k: string, v: string) => void datos.set(k, v),
-      removeItem: (k: string) => void datos.delete(k),
-      key: (i: number) => [...datos.keys()][i] ?? null,
+      setItem: (k: string, v: string) => {
+        datos.set(k, v)
+      },
+      removeItem: (k: string) => {
+        datos.delete(k)
+      },
+      key: (i: number) => [...datos.keys()].at(i) ?? null,
       get length() {
         return datos.size
       },

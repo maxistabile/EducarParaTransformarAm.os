@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
+import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from '@supabase/supabase-js'
 
 // Cliente supabase simulado: functions.invoke programable, consultas de
 // tabla registradas y canales de Realtime.
@@ -11,25 +12,41 @@ const { estado } = vi.hoisted(() => ({
     filas: { data: [] as unknown, error: null as unknown },
     canales: [] as Array<{ nombre: string; config: Record<string, unknown>; cb: () => void }>,
     quitados: 0,
+    quitarFalla: false,
   },
 }))
 
 vi.mock('../lib/supabase', () => {
-  const q: Record<string, unknown> = {}
-  for (const m of ['select', 'eq', 'not', 'order']) {
-    q[m] = (...args: unknown[]) => {
-      estado.consulta.push([m, args])
+  // Consulta encadenable con métodos explícitos: registra cada llamada
+  const q = {
+    select(...args: unknown[]) {
+      estado.consulta.push(['select', args])
       return q
-    }
+    },
+    eq(...args: unknown[]) {
+      estado.consulta.push(['eq', args])
+      return q
+    },
+    not(...args: unknown[]) {
+      estado.consulta.push(['not', args])
+      return q
+    },
+    order(...args: unknown[]) {
+      estado.consulta.push(['order', args])
+      return q
+    },
+    then(ok: (v: unknown) => unknown, mal: (e: unknown) => unknown) {
+      return Promise.resolve(estado.filas).then(ok, mal)
+    },
   }
-  q.then = (ok: (v: unknown) => unknown, mal: (e: unknown) => unknown) =>
-    Promise.resolve(estado.filas).then(ok, mal)
   return {
     supabase: {
       functions: {
         invoke: (nombre: string, opciones: { body: unknown }) => {
           estado.invocaciones.push({ nombre, body: opciones.body })
-          return estado.rechazo ? Promise.reject(estado.rechazo) : Promise.resolve(estado.respuesta)
+          const rechazo = estado.rechazo
+          if (rechazo instanceof Error) return Promise.reject(rechazo)
+          return Promise.resolve(estado.respuesta)
         },
       },
       from: (tabla: string) => {
@@ -48,7 +65,8 @@ vi.mock('../lib/supabase', () => {
       },
       removeChannel: () => {
         estado.quitados++
-        return Promise.resolve('ok')
+        const falla = new Error('canal')
+        return estado.quitarFalla ? Promise.reject(falla) : Promise.resolve('ok')
       },
     },
   }
@@ -64,6 +82,7 @@ beforeEach(() => {
   estado.filas = { data: [], error: null }
   estado.canales = []
   estado.quitados = 0
+  estado.quitarFalla = false
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => {
@@ -105,23 +124,45 @@ describe('registrarComprobante (HU54)', () => {
       })
   })
 
+  const enviar = () => ServicioPagos.registrarComprobante({ clave: 'k-1', idFactura: 30, items: [31], archivo: archivo() })
+  const http = (status: number, cuerpo: string) =>
+    new FunctionsHttpError(new Response(cuerpo, { status, headers: { 'Content-Type': 'application/json' } }))
+
   it('un error HTTP con cuerpo usa el código del cuerpo', async () => {
-    estado.respuesta = {
-      data: null,
-      error: { name: 'FunctionsHttpError', context: { json: () => Promise.resolve({ ok: false, codigo: 'PAG_SIN_SESION' }) } },
-    }
-    expect(await ServicioPagos.registrarComprobante({ clave: 'k-1', idFactura: 30, items: [31], archivo: archivo() }))
-      .toMatchObject({ ok: false, codigo: 'PAG_SIN_SESION', reintentable: false })
+    estado.respuesta = { data: null, error: http(401, JSON.stringify({ ok: false, codigo: 'PAG_SIN_SESION' })) }
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_SIN_SESION', reintentable: false })
+    estado.respuesta = { data: null, error: http(502, JSON.stringify({ ok: false, codigo: 'PAG_SUBIDA' })) }
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_SUBIDA', reintentable: true })
+  })
+
+  it('un error HTTP sin JSON: 401 es sesión vencida; otro estado, error reintentable', async () => {
+    estado.respuesta = { data: null, error: http(401, 'Invalid JWT') }
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_SIN_SESION', reintentable: false })
+    estado.respuesta = { data: null, error: http(500, '<html>error</html>') }
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
+    estado.respuesta = { data: null, error: http(500, JSON.stringify({ code: 500 })) }
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
+    expect(console.error).toHaveBeenCalled()
   })
 
   it('sin respuesta (red) es reintentable con la misma clave y no rechaza', async () => {
+    // FunctionsFetchError trae el error de red como contexto
+    estado.respuesta = { data: null, error: new FunctionsFetchError(new TypeError('Failed to fetch')) }
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_RED', reintentable: true })
+    // si invoke llegara a rechazar, tampoco rechaza el servicio
     estado.rechazo = new TypeError('Failed to fetch')
-    expect(await ServicioPagos.registrarComprobante({ clave: 'k-1', idFactura: 30, items: [31], archivo: archivo() }))
-      .toMatchObject({ ok: false, codigo: 'PAG_RED', reintentable: true })
-    estado.rechazo = null
-    estado.respuesta = { data: null, error: { name: 'FunctionsFetchError' } }
-    expect(await ServicioPagos.registrarComprobante({ clave: 'k-1', idFactura: 30, items: [31], archivo: archivo() }))
-      .toMatchObject({ ok: false, codigo: 'PAG_RED', reintentable: true })
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_RED', reintentable: true })
+  })
+
+  it('error del relay o respuestas inesperadas: error reintentable, sin rechazar', async () => {
+    estado.respuesta = { data: null, error: new FunctionsRelayError(new Response('', { status: 502 })) }
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
+    for (const data of [null, 'texto', [1, 2], { ok: 'si' }, { ok: false }]) {
+      estado.respuesta = { data, error: null }
+      expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR', reintentable: true })
+    }
+    estado.respuesta = { data: { ok: false, codigo: 7 }, error: null }
+    expect(await enviar()).toMatchObject({ ok: false, codigo: 'PAG_ERROR' })
   })
 })
 
@@ -202,6 +243,7 @@ describe('escucharCambios (Observer, Realtime)', () => {
     let avisos = 0
     const cortar = ServicioPagos.escucharCambios({ idAlumno: 7 }, () => avisos++)
     expect(estado.canales[0].config).toEqual({ event: '*', schema: 'public', table: 'pagos', filter: 'id_alumno=eq.7' })
+    expect(estado.canales[0].nombre).toMatch(/^pagos-7-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     estado.canales[0].cb()
     expect(avisos).toBe(1)
     cortar()
@@ -211,5 +253,21 @@ describe('escucharCambios (Observer, Realtime)', () => {
   it('la bandeja de la web escucha todos los comprobantes', () => {
     ServicioPagos.escucharCambios({}, () => {})
     expect(estado.canales[0].config).toEqual({ event: '*', schema: 'public', table: 'pagos' })
+    expect(estado.canales[0].nombre).toMatch(/^pagos-gestion-/)
+  })
+
+  it('cada suscripción usa un canal propio', () => {
+    ServicioPagos.escucharCambios({ idAlumno: 7 }, () => {})
+    ServicioPagos.escucharCambios({ idAlumno: 7 }, () => {})
+    expect(estado.canales[0].nombre).not.toBe(estado.canales[1].nombre)
+  })
+
+  it('si quitar el canal falla, se registra sin rechazar', async () => {
+    estado.quitarFalla = true
+    const cortar = ServicioPagos.escucharCambios({ idAlumno: 7 }, () => {})
+    expect(() => cortar()).not.toThrow()
+    await new Promise((listo) => setTimeout(listo, 0))
+    expect(estado.quitados).toBe(1)
+    expect(console.error).toHaveBeenCalledWith('[ServicioPagos] quitar canal:', expect.objectContaining({ nombre: 'Error' }))
   })
 })

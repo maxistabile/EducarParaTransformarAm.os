@@ -34,10 +34,19 @@ import { PDFDocument, StandardFonts, rgb } from 'npm:pdf-lib@1.17.1'
 
 const BUCKET = 'pagos'
 const MAX_BYTES = 5 * 1024 * 1024
-const EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'application/pdf': 'pdf',
+/** Únicos tipos aceptados (RNF8): los decide tipoReal por el contenido. */
+type TipoArchivo = 'image/jpeg' | 'image/png' | 'application/pdf'
+
+/** Extensión de la ruta en Storage, de una lista cerrada. */
+function extensionDe(tipo: TipoArchivo): 'jpg' | 'png' | 'pdf' {
+  switch (tipo) {
+    case 'image/jpeg':
+      return 'jpg'
+    case 'image/png':
+      return 'png'
+    case 'application/pdf':
+      return 'pdf'
+  }
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ZONA = 'America/Argentina/Buenos_Aires'
@@ -80,13 +89,20 @@ async function rpc<T>(db: SupabaseClient, fn: string, args: Record<string, unkno
 }
 
 // ── Archivo ───────────────────────────────────────────────────
-/** Tipo real según los primeros bytes (magic bytes). */
-function tipoReal(b: Uint8Array): string | null {
-  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg'
-  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
-  if (b.length >= 8 && png.every((v, i) => b[i] === v)) return 'image/png'
-  const pdf = [0x25, 0x50, 0x44, 0x46, 0x2d] // %PDF-
-  if (b.length >= 5 && pdf.every((v, i) => b[i] === v)) return 'application/pdf'
+const FIRMA_JPEG: readonly number[] = [0xff, 0xd8, 0xff]
+const FIRMA_PNG: readonly number[] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+const FIRMA_PDF: readonly number[] = [0x25, 0x50, 0x44, 0x46, 0x2d] // %PDF-
+
+/** ¿Los primeros bytes del archivo son exactamente la firma? */
+function empiezaCon(bytes: Uint8Array, firma: readonly number[]): boolean {
+  return bytes.length >= firma.length && firma.every((valor, i) => bytes.at(i) === valor)
+}
+
+/** Tipo real según los primeros bytes (magic bytes); null si no es aceptado. */
+function tipoReal(bytes: Uint8Array): TipoArchivo | null {
+  if (empiezaCon(bytes, FIRMA_JPEG)) return 'image/jpeg'
+  if (empiezaCon(bytes, FIRMA_PNG)) return 'image/png'
+  if (empiezaCon(bytes, FIRMA_PDF)) return 'application/pdf'
   return null
 }
 
@@ -133,7 +149,7 @@ async function subir(db: SupabaseClient, usuario: string, form: FormData) {
     return { id_pago: previa.id_pago, estado_pago: previa.estado_pago, ya_existia: true }
 
   // 2) Ruta propia de esta solicitud, sin upsert: nunca pisa otro archivo
-  const ruta = `comprobantes/${idFactura}/${clave}/${crypto.randomUUID()}.${EXTENSION[tipo]}`
+  const ruta = `comprobantes/${idFactura}/${clave}/${crypto.randomUUID()}.${extensionDe(tipo)}`
   const subida = await db.storage.from(BUCKET).upload(ruta, bytes, { contentType: tipo, upsert: false })
   if (subida.error) {
     console.error('[pagos] subida:', { status: (subida.error as { statusCode?: string }).statusCode })
@@ -147,7 +163,7 @@ async function subir(db: SupabaseClient, usuario: string, form: FormData) {
       p_usuario: usuario, p_clave: clave, p_id_factura: idFactura, p_items: ordenados,
       p_huella: huella, p_path: ruta, p_tipo: tipo,
     })
-  } catch (e) {
+  } catch (e: unknown) {
     await limpiarSiNoVinculado(db, clave, ruta)
     throw e
   }
@@ -182,8 +198,10 @@ interface DatosRecibo {
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
   'septiembre', 'octubre', 'noviembre', 'diciembre']
+// Intl separa "$" del número con un espacio duro (U+00A0): se cambia por un
+// espacio común, explícito, para el PDF.
 const pesos = (n: number) =>
-  Number(n).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' }).replace(/ /g, ' ')
+  Number(n).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' }).replace(/\u00a0/g, ' ')
 const numero = (prefijo: string, id: number) => `${prefijo}-${String(id).padStart(6, '0')}`
 
 /** PDF solo con datos históricos: regenerarlo da el mismo contenido. */
@@ -322,10 +340,12 @@ Deno.serve(async (req) => {
       default:
         throw new ErrorPago('PAG_SOLICITUD_INVALIDA', '', 400)
     }
-  } catch (e) {
+  } catch (e: unknown) {
     if (e instanceof ErrorPago)
       return responder({ ok: false, codigo: e.codigo, detalle: e.detalle }, e.status)
-    console.error('[pagos] inesperado:', { nombre: (e as Error)?.name })
+    // Solo el tipo de error: nunca el mensaje (puede traer tokens, rutas o URLs)
+    const nombre = e instanceof Error ? e.name : typeof e
+    console.error('[pagos] inesperado:', { nombre })
     return responder({ ok: false, codigo: 'PAG_ERROR' }, 500)
   }
 })
