@@ -51,6 +51,7 @@ import { puedeGestionarValores } from './reglasValores'
 // Parte 3 · HU50 (etapa A) — facturación mensual (componente aparte)
 import GestionFacturacion from './gestion/GestionFacturacion'
 import GestionComprobantes from './gestion/GestionComprobantes'
+import GestionListadosPagos from './gestion/GestionListadosPagos'
 import { colorEstadoCobro, mensajeErrorFacturacion } from './reglasFacturacion'
 import { esCuotaACobrar, etiquetaEstadoCuota, netoCuota } from './reglasCuotas'
 
@@ -355,6 +356,7 @@ const NAV_ADMIN = [
   { key: 'transporte', icon: '🚌', label: 'Transporte' },
   { key: 'comedor', icon: '🍽️', label: 'Comedor' },
   { key: 'reportes', icon: '📊', label: 'Reportes' },
+  { key: 'listados', icon: '📈', label: 'Listados de pagos' },
   { key: 'reservas', icon: '🏟️', label: 'Reservas' },
   { key: 'mensajes', icon: '✉️', label: 'Mensajes' },
   { key: 'noticias', icon: '📰', label: 'Noticias' },
@@ -670,6 +672,7 @@ export default function AdminPanel() {
           {activeNav === 'transporte' && esAdmin && <GestionTransporte />}
           {activeNav === 'comedor' && esAdmin && <GestionComedor />}
           {activeNav === 'reportes' && esAdmin && <ReportesDireccion />}
+          {activeNav === 'listados' && esAdmin && <GestionListadosPagos />}
           {activeNav === 'reservas' && <GestionReservas userId={user.id} />}
           {activeNav === 'noticias' && esAdmin && (
             <GestionNoticias userId={user.id} />
