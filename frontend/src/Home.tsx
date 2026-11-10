@@ -127,6 +127,9 @@ const NAV_LINKS = [
   { label: 'Empleos', href: '#empleos' },
   { label: 'Galerías', href: '#galeria' },
   { label: 'Campus Virtual', href: '/login', isRoute: true },
+  // Enlace común (no navigate): la app se carga como documento propio, con
+  // su manifiesto y su service worker (ver app/navegacion.ts).
+  { label: 'App móvil', href: '/app/' },
   { label: 'Contacto', href: '#contacto' },
 ]
 
