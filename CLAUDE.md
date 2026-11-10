@@ -5,11 +5,11 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 - **Equipo:** Stabile, Maximiliano (dueño del repo, `maxistabile`) · Jara, Agostina (`agostinaj1`)
 - **Materia:** Metodología de Sistemas II – TUP 2026 (UTN FRRe) – Comisión 1 (tarde)
 - **Idioma:** todo en **español rioplatense** (interfaz, mensajes de commit, PR, documentación y comentarios).
-- **App web en producción:** https://educarparatransformar.vercel.app
+- **App web en producción:** https://educarparatransformar.vercel.app (PWA: `/app/`, también desde el menú "App móvil" del sitio)
 
 ---
 
-## 1. Estado del proyecto (al 09/11/2026)
+## 1. Estado del proyecto (al 10/11/2026)
 
 | Parte del TPI | Estado |
 |---|---|
@@ -17,7 +17,7 @@ Guía para trabajar en este repositorio con Claude Code. Leela completa antes de
 | Parte 2 – Sistema de gestión web (RF1 a RF9, HU1 a HU40) | ✅ Terminado, desplegado y evaluado (27/10) |
 | TP Unidad 4 – CI/CD y optimización | ✅ Entregado |
 | TP Unidad 5 – Pruebas y calidad | ✅ Entregado |
-| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18), HU41, HU42 y parte de HU45 (PR #19), HU43 y HU44 (PR #24), HU46 a HU49 (PR #27), HU50 etapa A (PR #30), HU59 (PR #32), HU51 con HU52 y HU53 parciales (PR #34) **HU54 a HU56 con el cierre de HU52 y HU53 (PR #36, `6590cee`)** y la corrección de envíos simultáneos (PR #38, `085a39f`, `etapa19` ejecutada). HU45 no queda completa: ver sección 3.1. **HU57 y HU58 con el PDF de la factura (PR #40, `b568357`)**. **HU50 etapa B, HU60 y HU61 (PR #42, `f6f9119`)**: desplegadas y probadas por el equipo (cron programado; todavía sin una ejecución programada observada). **HU62 a HU66 (listados de pagos) en curso** en `feat/HU62-66-listados-pagos`. |
+| **Parte 3 – Aplicación móvil integrada con IA** | ⏳ **En curso: se hace como PWA (no app nativa).** En `main`: base de la PWA (PR #15), manifiesto (PR #18), HU41, HU42 y parte de HU45 (PR #19), HU43 y HU44 (PR #24), HU46 a HU49 (PR #27), HU50 etapa A (PR #30), HU59 (PR #32), HU51 con HU52 y HU53 parciales (PR #34) **HU54 a HU56 con el cierre de HU52 y HU53 (PR #36, `6590cee`)** y la corrección de envíos simultáneos (PR #38, `085a39f`, `etapa19` ejecutada). HU45 no queda completa: ver sección 3.1. **HU57 y HU58 con el PDF de la factura (PR #40, `b568357`)**. **HU50 etapa B, HU60 y HU61 (PR #42, `f6f9119`)**: desplegadas y probadas por el equipo (cron programado; todavía sin una ejecución programada observada). **HU62 a HU66 (listados de pagos) integradas (PR #44, `7bde2b5`)**: recorrido aprobado por el equipo. Android aprobado por el equipo en las pantallas probadas de Padre y Alumno. **Preparación de la coevaluación** (Inicio con accesos por rol y guías) en `feat/coevaluacion-retoques`. |
 
 ### Fechas que no se mueven
 - **09/11/2026 – Cierre de desarrollo:** integración, pruebas integrales y despliegue final de la PWA (según el plan).
@@ -197,8 +197,8 @@ Cada paso es un PR (o pocos). Priorizar que el flujo **"consultar cuota → paga
    - HU52 parcial hasta HU56: cuotas pagadas con la fecha de pago registrada ("Sin fecha registrada" si falta); no hay fecha de aprobación ni comprobante.
    - HU53 parcial: solo pagos registrados por la administración, identificados así; sin En revisión ni Rechazado (HU54/HU55). No lee la tabla `pagos`.
    - Neto 0 en "Sin cargo", aparte; "Cubierta por beca" solo si el dato lo respalda.
-   - Recorrido manual aprobado por el equipo (08/11), salvo la beca del 100 %, que no se probó a mano por falta de un caso. Android, pendiente.
-7. ✅ **HU54 → HU55 → HU56:** integradas por el PR #36 (`6590cee`, 09/11). El equipo ejecutó el relevamiento, `etapa18` y `pruebas_etapa18` (16 de 16), desplegó la Edge Function `pagos`, aprobó el recorrido con Supabase real (bitácora 29) y la volvió a publicar después de las correcciones de Codacy (bitácora 31 a 33; cuatro falsos positivos marcados a mano). Pendientes: Android y la beca del 100 %.
+   - Recorrido manual aprobado por el equipo (08/11), salvo la beca del 100 %, que no se probó a mano por falta de un caso. Android aprobado por el equipo (10/11) en las pantallas probadas.
+7. ✅ **HU54 → HU55 → HU56:** integradas por el PR #36 (`6590cee`, 09/11). El equipo ejecutó el relevamiento, `etapa18` y `pruebas_etapa18` (16 de 16), desplegó la Edge Function `pagos`, aprobó el recorrido con Supabase real (bitácora 29) y la volvió a publicar después de las correcciones de Codacy (bitácora 31 a 33; cuatro falsos positivos marcados a mano). Android aprobado por el equipo en las pantallas probadas; la beca del 100 % sigue sin un caso manual.
    - ✅ **Corrección de envíos simultáneos** (PR #38, `etapa19`, bitácora 34 y 35): dos envíos simultáneos con la misma clave devuelven el mismo comprobante. `etapa19` ejecutada por el equipo; el recorrido manual de esta corrección no se hizo.
    - Datos (`etapa18`): `pagos` reutilizada como comprobante + `pago_items`; estados `En revision` / `Aprobado` / `Rechazado`; clave y huella por envío; bloqueos factura → pago → cuotas.
    - Edge Function `pagos`: verifica la sesión con `auth.getUser`; sube a una ruta propia sin upsert; revisión; comprobante de pago en PDF con datos históricos.
@@ -210,17 +210,19 @@ Cada paso es un PR (o pocos). Priorizar que el flujo **"consultar cuota → paga
    - HU57: filtro por **fecha de emisión**, incluidos los dos días; "desde" no puede ser posterior a "hasta". Cada factura muestra conceptos, importes, estados, todos sus comprobantes y los PDF (factura, archivo enviado y comprobante de pago).
    - HU58: por concepto (cuota, cada deporte, cada recorrido y comedor) y mes, con su saldo; el total es la suma de los pendientes (En revisión sigue en el total); cuotas heredadas sin duplicar y Sin cargo fuera de la deuda.
    - Lógica en `app/reglasFacturasDeuda.ts`; servicios `ServicioCuotas.facturas` / `deudaPorItem` y `ServicioPagos.urlFactura`.
-9. ✅ **HU60 y HU61 (y HU50 etapa B):** integradas por el PR #42 (`f6f9119`; bitácora 38 a 41). El equipo ejecutó `etapa21` (10 controles) y `etapa22`, publicó `pagos` y `avisos`, configuró los secrets, aprobó cuatro simulaciones, recibió un correo mensual real con el PDF correcto (el reintento no mandó un segundo correo), activó pg_cron y pg_net con tres jobs, y `fn_avisos_disparar` respondió HTTP 200 con `ok` (invocación **manual** desde SQL). **Pendiente:** observar una ejecución **programada** del cron; recién ahí se cierran HU50, HU60 y HU61 (las Issues no se cierran automáticamente).
+9. ✅ **HU60 y HU61 (y HU50 etapa B):** integradas por el PR #42 (`f6f9119`; bitácora 38 a 41). El equipo ejecutó `etapa21` (10 controles) y `etapa22`, publicó `pagos` y `avisos`, configuró los secrets, aprobó cuatro simulaciones, recibió un correo mensual real con el PDF correcto (el reintento no mandó un segundo correo), activó pg_cron y pg_net con tres jobs, y `fn_avisos_disparar` respondió HTTP 200 con `ok` (invocación **manual** desde SQL, después de corregir la clave en Vault). Al 09/11 el historial de los tres jobs seguía vacío. El aviso de deuda (HU61) se probó **solo en simulación**: falta una recepción real controlada. Resend sigue limitado al correo autorizado del equipo con el remitente de prueba. **Pendiente:** observar una ejecución **programada** del cron (`verificaciones/estado_avisos_cron.sql`, solo lectura; pasos en `entregas-pwa/correos-y-cron.md`); recién ahí se cierran HU50, HU60 y HU61 (las Issues no se cierran automáticamente).
    - Edge Function `avisos`, disparada por pg_cron tres veces por día (9, 13 y 17 de Argentina), protegida con `AVISOS_CLAVE`. El último día hábil factura el mes siguiente y manda a cada padre la composición por hijo, el total y la factura PDF de cada hijo (la genera `pagos`, acción interna `factura_sistema`). El día 20 manda el aviso de deuda por ítem solo a padres con deuda (En revisión no acredita).
    - `avisos_envios`: un registro por tipo, período y padre, con reserva atómica e `Idempotency-Key` en Resend. Estados: Enviado, Fallido (se reintenta), Incierto (solo con la misma clave, destinatario y contenido dentro de 23 h del primer intento; después, revisión manual) y Omitido. Si un intento pudo llegar al proveedor (`posible_envio`), un Omitido, un error del PDF o un rechazo posterior no lo descartan: sigue Incierto (bitácora 39).
    - Despliegue: una única secuencia en `supabase/sql/README.md` (Etapa 21). Secrets y funciones van antes; `etapa21`, el PR y `etapa22` después, en ese orden, así "Generar facturas" no se corta.
    - Reutiliza Resend y los secrets de `enviar-notificacion`, que no cambia. Sin `EMAIL_ALLOWLIST` no envía. Modo `simular` para probar fechas sin escribir ni enviar.
-10. **HU62–HU66:** listados de pagos en la web, en `feat/HU62-66-listados-pagos` (bitácora 42 y 43). Sección **Listados de pagos** (Admin y Directivo), sin SQL nuevo.
+10. ✅ **HU62–HU66:** listados de pagos en la web, integrados por el PR #44 (`7bde2b5`; bitácora 42 a 44). Recorrido manual aprobado por el equipo. Sección **Listados de pagos** (Admin y Directivo), sin SQL nuevo.
    - Lógica pura en `reglasListadosPagos.ts` (con pruebas); datos por `ServicioListadosPagos` (Facade, lee por páginas para no truncar en 1000 filas); pantalla `gestion/GestionListadosPagos.tsx`; CSV con `tablaACSV` de `reportes.ts`.
    - HU62: solo lo acreditado (comprobantes Aprobados por su fecha de aprobación en Argentina y registros administrativos por su fecha de pago, identificados como tales); En revisión, Rechazado y Sin cargo no cuentan; una cuota pagada con comprobante se cuenta una vez.
    - HU63 y HU64: facturas completas e incompletas del **período facturado** elegido, con saldo. Cada factura se agrupa **una sola vez** por el **"Año de última acreditación"**: la fecha más reciente de lo ya pagado (aprobación del comprobante en Argentina o fecha de pago del registro administrativo); en una completa es el año en que quedó saldada. **"Sin pagos"** si no tiene ninguno y **"Sin fecha registrada"** si algún pago no tiene fecha (nunca se infiere del período). También se filtran por "año de cursado" (del curso copiado en la factura). Sin cargo aparte.
    - HU65: ítems de deporte con el grupo de la inscripción **vigente en ese mes** (por fechas de alta y baja); filtros por deporte, nivel, horario, profesor y estado, solos o combinados. Nivel, horario y profesor son los **datos actuales del grupo** (así se rotulan en pantalla y en el CSV); un dato faltante se muestra como "Sin dato en el grupo".
    - HU66: ítems de transporte por recorrido y período. El recorrido se muestra con la **descripción histórica del ítem facturado** (un cambio de nombre posterior no la altera); el filtro usa `id_recorrido`.
+
+11. **Coevaluación (10/11):** rama `feat/coevaluacion-retoques` (bitácora 45 y 46). Informado por el equipo: Inicio aprobado como Tutor y Alumno, también a 360 px (local); `datos_demo_coevaluacion.sql` con todos los casos en OK; la previa del aviso de deuda encontró un destinatario al 20/10, ninguno del equipo, así que la recepción real sigue sin comprobar (no se fuerzan datos). Android del Inicio nuevo: pendiente hasta publicar. Inicio de la app con bienvenida y accesos según el rol (sin consultas nuevas), enlace "App móvil" en el sitio y SQL de solo lectura para el cron y los datos de la demo. Guía, evidencias, borrador del informe y pasos de correos y cron en `entregas-pwa/` (fuera del repo).
 
 ### 7.5. Informe de uso de IA (17/11)
 Cinco apartados: (1) relación entre web y app; (2) bitácora de IA; (3) IA vs. conocimiento del sistema; (4) tabla "Sin IA / Con IA" (generación de código, tiempo, comprensión, detección de errores, documentación, aprendizaje, integración, seguridad, mantenimiento, calidad); (5) reflexión crítica con 10 preguntas.
@@ -234,7 +236,7 @@ El plan define la bitácora como una **planilla compartida en Google Drive** que
 | Nº | Fecha | Problema | Prompt utilizado (resumen) | Herramienta de IA | Respuesta de IA (resumen) | ¿Funcionó? (Sí / Parcialmente / No) | Modificaciones realizadas por el equipo | Resultado (Correcto / Reemplazado / …) |
 |---|---|---|---|---|---|---|---|---|
 
-- **Herramientas:** Claude Code (desktop), Claude (chat), Copilot Code Review.
+- **Herramientas del equipo:** ChatGPT y Claude Code (desktop). La fila 1 registra además un uso de Claude (chat). Cada integrante aporta sus propios usos de las dos herramientas con su evidencia; no se atribuyen consultas sin respaldo.
 - Registrar con honestidad lo que **no funcionó** y lo que **el equipo tuvo que corregir**: la consigna evalúa cómo se usó la IA, no solo el resultado.
 - La consigna exige que el equipo **entienda y pueda justificar** todo el código generado: explicar los cambios importantes antes de aplicarlos.
 
@@ -291,6 +293,8 @@ El plan define la bitácora como una **planilla compartida en Google Drive** que
     - En la ficha o con "Ver vínculos", sin recargar los listados ni mostrar contraseñas, dentro de los permisos de gestión existentes.
   - **Mejoras de navegación:** acceso a esos flujos desde Alumnos y Docentes, reutilizando la lógica de Usuarios.
   - **Mejora posterior:** comparar los datos del tutor de una nueva inscripción con los existentes y mostrar las diferencias antes de actualizarlos. No sobrescribir automáticamente su identidad, correo ni credenciales.
+
+- **Limitación conocida de HU65:** nivel, horario y profesor son los datos **actuales** del grupo de la inscripción vigente en ese mes (rotulados así), no una foto histórica.
 
 - **Pendiente de definir: cobro de las altas posteriores a la factura** (detectado en el recorrido de HU51 a HU53, 08/11/2026). Una inscripción dada de alta después de emitir la factura del período no se incorpora a ella ni genera otra. Hay que definir y resolver cómo se cobra, conservando la inmutabilidad de las facturas emitidas. Sin implementar.
 

@@ -318,8 +318,12 @@ de la función. La prueba suponía que el Padre elegido tenía solo los dos hijo
 que le asigna, pero en la base real ya tenía otros, y `fn_avisos_mensual` los
 incluye correctamente. La prueba se corrigió: calcula lo esperado a partir de
 los datos. No hay que volver a ejecutar `etapa21`; solo
-`verificaciones/pruebas_etapa21.sql`, **pendiente de que el equipo informe el
-resultado**.
+`verificaciones/pruebas_etapa21.sql`. *Informado por el equipo (09/11):*
+`pruebas_etapa21` con 10 controles y `pruebas_etapa20` con 7; `etapa22`
+aplicada; tres jobs de pg_cron activos; `fn_avisos_disparar` invocada **a mano**
+desde SQL respondió HTTP 200 con `ok` (después de corregir la clave en Vault).
+**Todavía no se observó una ejecución programada**: comprobarla con
+`verificaciones/estado_avisos_cron.sql` (solo lectura).
 
 *Verificado por la IA el 09/11 (no en Supabase):*
 - **PGlite:** `etapa21` dos veces y `pruebas_etapa21` 10 de 10, con S6b sobre la
@@ -331,6 +335,22 @@ resultado**.
   a la vez (K1 a K3).
 - **K4:** detiene una sesión entre leer y actualizar la reserva; sin el
   `FOR UPDATE`, falla.
+
+## Verificaciones de solo lectura para la coevaluación
+
+- `verificaciones/estado_avisos_cron.sql`: jobs, corridas registradas por
+  pg_cron, respuestas HTTP recientes de pg_net y conteo de `avisos_envios`.
+  Sirve para comprobar una ejecución **programada** (una invocación manual no
+  aparece en `cron.job_run_details`). No lee secretos ni dispara nada.
+- `verificaciones/datos_demo_coevaluacion.sql`: indica si existen los casos de
+  la demo (padre con dos hijos, facturas pendiente, parcial y saldada,
+  comprobantes en cada estado e ítems de deporte y transporte facturados).
+  Solo `select`; no crea ni modifica datos.
+- `verificaciones/previa_aviso_deuda.sql`: antes de una prueba controlada
+  del aviso de deuda con `recuperar` (último día 20 pasado), muestra qué
+  padres lo recibirían, qué le llegaría al correo del equipo y si ya hay un
+  envío registrado. El correo se escribe solo en el editor. Pasos en
+  `entregas-pwa/correos-y-cron.md` (fuera del repo).
 
 ## Pasos manuales adicionales
 
