@@ -30,10 +30,10 @@ type Tipo = 'ingresos' | 'completas' | 'incompletas' | 'deportes' | 'recorridos'
 
 const TIPOS: ReadonlyArray<{ key: Tipo; label: string; nota: string }> = [
   { key: 'ingresos', label: 'Ingresos por período (HU62)', nota: 'Solo lo acreditado: comprobantes aprobados (por su fecha de aprobación) y pagos registrados por la administración (por su fecha de pago). En revisión, Rechazado y Sin cargo no son ingresos.' },
-  { key: 'completas', label: 'Pagos completos (HU63)', nota: 'Facturas del período pagadas en su totalidad. "Año del pago" es el año del período facturado; "Año de cursado" sale del curso copiado en la factura.' },
-  { key: 'incompletas', label: 'Pagos incompletos (HU64)', nota: 'Facturas del período con pago parcial o sin pago, con su saldo. Lo que está en revisión todavía no cuenta como pagado.' },
-  { key: 'deportes', label: 'Pagos por deporte, nivel, horario y profesor (HU65)', nota: 'Ítems de deporte facturados. El grupo es el de la inscripción vigente en ese mes; nivel, horario y profesor son los datos actuales de ese grupo.' },
-  { key: 'recorridos', label: 'Pagos por recorrido de transporte (HU66)', nota: 'Ítems de transporte facturados: solo alumnos inscriptos al transporte en el mes facturado.' },
+  { key: 'completas', label: 'Pagos completos (HU63)', nota: 'Facturas del período facturado elegido, pagadas en su totalidad. Se agrupan una sola vez por el "Año de última acreditación": el año en que quedó saldada (fecha de aprobación del comprobante o fecha de pago registrada por la administración). Si algún pago no tiene fecha, figura "Sin fecha registrada". "Año de cursado" sale del curso copiado en la factura.' },
+  { key: 'incompletas', label: 'Pagos incompletos (HU64)', nota: 'Facturas del período facturado elegido con pago parcial o sin pago, con su saldo. Se agrupan una sola vez por el "Año de última acreditación" de lo ya pagado ("Sin pagos" si no tienen ninguno; "Sin fecha registrada" si algún pago no tiene fecha). Lo que está en revisión todavía no cuenta como pagado.' },
+  { key: 'deportes', label: 'Pagos por deporte, nivel, horario y profesor (HU65)', nota: 'Ítems de deporte facturados. El grupo es el de la inscripción vigente en ese mes. Nivel, horario y profesor son los datos ACTUALES de ese grupo (no una foto de aquel momento); si falta un dato, se indica.' },
+  { key: 'recorridos', label: 'Pagos por recorrido de transporte (HU66)', nota: 'Ítems de transporte facturados: solo alumnos inscriptos al transporte en el mes facturado. El recorrido se muestra como figura en la factura (si después se renombró, no cambia); el filtro usa el recorrido, por su nombre actual.' },
 ]
 const ESTADOS = ['Pagado', 'Registro administrativo', 'En revisión', 'Pendiente', 'Sin cargo']
 
@@ -171,7 +171,7 @@ export default function GestionListadosPagos() {
       }
       case 'completas':
       case 'incompletas': {
-        const l = listadoFacturas(datos, tipo, { ...meses, anioPago: f.get('anioPago'), anioCursado: f.get('anioCursado') }, hoy)
+        const l = listadoFacturas(datos, tipo, { ...meses, anioAcreditacion: f.get('anioAcreditacion'), anioCursado: f.get('anioCursado') }, hoy)
         return { tabla: tablaFacturas(l), extra: l }
       }
       case 'deportes': {
@@ -261,9 +261,9 @@ export default function GestionListadosPagos() {
           )}
           {(tipo === 'completas' || tipo === 'incompletas') && vista && (
             <>
-              <Campo etiqueta='Año del pago (período facturado)'>
-                <Seleccion valor={val('anioPago')} alCambiar={filtro('anioPago')} todos='Todos'
-                  opciones={(vista.extra as ListadoFacturas).opciones.aniosPago.map((a) => ({ value: String(a), label: String(a) }))} />
+              <Campo etiqueta='Año de última acreditación'>
+                <Seleccion valor={val('anioAcreditacion')} alCambiar={filtro('anioAcreditacion')} todos='Todos'
+                  opciones={(vista.extra as ListadoFacturas).opciones.aniosAcreditacion.map((a) => ({ value: a, label: a }))} />
               </Campo>
               <Campo etiqueta='Año de cursado'>
                 <Seleccion valor={val('anioCursado')} alCambiar={filtro('anioCursado')} todos='Todos'
@@ -282,7 +282,7 @@ export default function GestionListadosPagos() {
             </>
           )}
           {tipo === 'recorridos' && (
-            <Campo etiqueta='Recorrido'><Seleccion valor={val('id_recorrido')} alCambiar={filtro('id_recorrido')} todos='Todos' opciones={recorridos} /></Campo>
+            <Campo etiqueta='Recorrido (nombre actual)'><Seleccion valor={val('id_recorrido')} alCambiar={filtro('id_recorrido')} todos='Todos' opciones={recorridos} /></Campo>
           )}
           {(tipo === 'deportes' || tipo === 'recorridos') && (
             <Campo etiqueta='Estado de pago'><Seleccion valor={val('estado')} alCambiar={filtro('estado')} todos='Todos' opciones={estados} /></Campo>
@@ -333,7 +333,7 @@ export default function GestionListadosPagos() {
                 {l.sinCargo > 0 && <p className='mb-3 text-[12px] text-textMuted'>{l.sinCargo} factura(s) Sin cargo (total $ 0) no se incluyen: no son pagos.</p>}
                 {l.grupos.map((g) => (
                   <p key={g.clave} className='text-[12px] text-textMuted'>
-                    <strong>Año del pago {g.anioPago} · {g.anioCursado}:</strong> {g.filas.length} factura(s), total {pesos(g.total)}, pagado {pesos(g.pagado)}{tipo === 'incompletas' ? `, saldo ${pesos(g.saldo)}` : ''}
+                    <strong>Última acreditación: {g.anioAcreditacion} · {g.anioCursado}:</strong> {g.filas.length} factura(s), total {pesos(g.total)}, pagado {pesos(g.pagado)}{tipo === 'incompletas' ? `, saldo ${pesos(g.saldo)}` : ''}
                   </p>
                 ))}
               </>
@@ -342,12 +342,24 @@ export default function GestionListadosPagos() {
           {(tipo === 'deportes' || tipo === 'recorridos') && (() => {
             const l = vista.extra as ListadoItems
             return (
+              <>
+              {tipo === 'deportes' && (
+                <p className='mb-3 rounded-input bg-purpleLight px-3 py-2 text-[12px] font-semibold text-purpleDark'>
+                  Nivel, horario y profesor son los datos actuales del grupo de la inscripción vigente en cada mes, no una foto de aquel momento.
+                </p>
+              )}
+              {tipo === 'recorridos' && (
+                <p className='mb-3 rounded-input bg-purpleLight px-3 py-2 text-[12px] font-semibold text-purpleDark'>
+                  El recorrido se muestra como figura en cada factura, aunque hoy tenga otro nombre.
+                </p>
+              )}
               <Totales datos={[
                 ['Importe facturado', pesos(l.totales.importe)],
                 ['Cobrado', pesos(l.totales.cobrado)],
                 ['En revisión (sin acreditar)', pesos(l.totales.enRevision)],
                 ['Saldo', pesos(l.totales.saldo)],
               ]} />
+              </>
             )
           })()}
 

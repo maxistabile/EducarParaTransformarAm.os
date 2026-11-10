@@ -14,17 +14,25 @@
 //     pago registrada). Una cuota pagada con un comprobante aprobado
 //     también figura Pagada en cuotas: se cuenta UNA sola vez (como
 //     comprobante). Sin cargo (neto 0) no es dinero cobrado.
-//   - Facturas completas e incompletas (HU63 y HU64): "Año del pago" es
-//     el año del período facturado (al que corresponde el pago); "Año de
-//     cursado" sale del curso copiado en la factura (nivel y año, sin la
-//     división). Las facturas Sin cargo (total 0) no son completas ni
-//     incompletas: se informan aparte.
-//   - Deportes (HU65): el grupo (nivel, horario y profesor) es el de la
-//     inscripción del alumno VIGENTE en ese mes a ese deporte (por sus
-//     fechas de alta y baja, aunque hoy esté dada de baja). Nivel, días,
-//     horario y profesor son los datos actuales de ese grupo.
-//   - Recorridos (HU66): el recorrido es el del ítem facturado; el ítem
-//     solo existe si el alumno estaba inscripto al transporte ese mes.
+//   - Facturas completas e incompletas (HU63 y HU64): el filtro de
+//     PERÍODO es el mes facturado. Aparte, cada factura se agrupa UNA vez
+//     por su "Año de última acreditación": la fecha real del último
+//     concepto acreditado (aprobación del comprobante en Argentina, o fecha
+//     de pago registrada por la administración); en una completa es el año
+//     en que quedó saldada. Sin conceptos pagados: "Sin pagos". Si algún
+//     pago no tiene fecha: "Sin fecha registrada" (no se infiere del
+//     período). "Año de cursado" sale del curso copiado en la factura
+//     (nivel y año, sin la división). Las facturas Sin cargo (total 0) no
+//     son completas ni incompletas: se informan aparte.
+//   - Deportes (HU65): el grupo es el de la inscripción del alumno VIGENTE
+//     en ese mes a ese deporte (por sus fechas de alta y baja, aunque hoy
+//     esté dada de baja). Nivel, días, horario y profesor son los datos
+//     ACTUALES de ese grupo, no una foto del pasado; si falta un dato, se
+//     dice que falta.
+//   - Recorridos (HU66): se muestra la descripción HISTÓRICA del ítem
+//     facturado (renombrar hoy un recorrido no cambia una factura vieja);
+//     el filtro usa el identificador del recorrido. El ítem solo existe si
+//     el alumno estaba inscripto al transporte ese mes.
 // ═══════════════════════════════════════════════════════════════
 import { netoCuota } from './reglasCuotas'
 import { nombrePeriodo, numeroFactura, pesos } from './reglasFacturacion'
@@ -300,17 +308,33 @@ export function anioDeCursado(curso: string | null): string {
   return partes.join(' ')
 }
 
+/** Grupo de una factura que todavía no tiene ningún concepto pagado. */
+export const SIN_PAGOS = 'Sin pagos'
+/** Grupo de una factura con algún pago acreditado cuya fecha no se conoce. */
+export const SIN_FECHA = 'Sin fecha registrada'
+
 export interface FiltrosFacturas {
-  desde: string // 'AAAA-MM'
+  /** Período FACTURADO (AAAA-MM), aparte de las fechas de acreditación. */
+  desde: string
   hasta: string
-  anioPago?: string // año del período facturado
+  /** Año de la última acreditación, SIN_PAGOS o SIN_FECHA. */
+  anioAcreditacion?: string
   anioCursado?: string
 }
 export interface FilaFactura {
   id_factura: number
   numero: string
+  /** Período facturado (el mes de la factura). */
   periodo: Periodo
-  anioPago: number
+  /**
+   * Fecha real de la última acreditación conocida de sus conceptos: la
+   * aprobación del comprobante (en Argentina) o la fecha de pago que
+   * registró la administración. null si no tiene pagos o si alguno no
+   * tiene fecha (no se infiere del período).
+   */
+  ultimaAcreditacion: string | null
+  /** Año de ultimaAcreditacion, o SIN_PAGOS / SIN_FECHA. En una completa: el año en que quedó saldada. */
+  anioAcreditacion: string
   alumno: string
   curso: string
   anioCursado: string
@@ -320,12 +344,10 @@ export interface FilaFactura {
   saldo: number
   estado: 'Pago completo' | 'Pago parcial' | 'Sin pago'
   vencida: boolean
-  /** Completas: la última fecha de pago acreditado de sus ítems. */
-  fechaPagoCompleto: string | null
 }
 export interface GrupoFacturas {
   clave: string
-  anioPago: number
+  anioAcreditacion: string
   anioCursado: string
   filas: FilaFactura[]
   total: number
@@ -338,8 +360,23 @@ export interface ListadoFacturas {
   totales: { facturas: number; total: number; pagado: number; enRevision: number; saldo: number }
   /** Facturas del período con total 0: no son completas ni incompletas. */
   sinCargo: number
-  opciones: { aniosPago: number[]; aniosCursado: string[] }
+  opciones: { aniosAcreditacion: string[]; aniosCursado: string[] }
 }
+
+/**
+ * Fecha de acreditación de un concepto pagado, desde su fuente real: la
+ * aprobación del comprobante (en Argentina) o la fecha de pago registrada
+ * por la administración en la cuota. null si no se conoce.
+ */
+function fechaAcreditacion(i: ItemL, aprobadoPorId: Map<number, PagoL>, cuotaPorId: Map<number, CuotaL>): string | null {
+  const pago = i.id_pago == null ? undefined : aprobadoPorId.get(i.id_pago)
+  if (pago) return pago.fecha_revision ? diaArgentina(pago.fecha_revision) : null
+  const cuota = i.id_cuota == null ? undefined : cuotaPorId.get(i.id_cuota)
+  return cuota?.fecha_pago ? diaArgentina(cuota.fecha_pago) : null
+}
+
+/** Grupos: primero los años, después "Sin fecha registrada" y "Sin pagos". */
+const ordenAcreditacion = (a: string) => (a === SIN_FECHA ? 1 : a === SIN_PAGOS ? 2 : 0)
 
 export function listadoFacturas(
   d: DatosListados,
@@ -349,6 +386,8 @@ export function listadoFacturas(
 ): ListadoFacturas {
   const itemsPorFactura = new Map<number, ItemL[]>()
   for (const i of d.items) itemsPorFactura.set(i.id_factura, [...(itemsPorFactura.get(i.id_factura) ?? []), i])
+  const aprobadoPorId = new Map(d.pagos.filter((p) => p.estado === 'Aprobado').map((p) => [p.id_pago, p]))
+  const cuotaPorId = new Map(d.cuotas.map((c) => [c.id_cuota, c]))
 
   const delPeriodo = d.facturas.filter((x) => enRangoMeses(x, f.desde, f.hasta))
   const sinCargo = delPeriodo.filter((x) => num(x.total) <= 0).length
@@ -357,15 +396,18 @@ export function listadoFacturas(
     .filter((x) => (tipo === 'completas' ? num(x.saldo) <= 0 : num(x.saldo) > 0))
     .map((x): FilaFactura => {
       const pagado = num(x.cobrado)
+      // Una fecha por concepto pagado (con importe); la factura se agrupa una sola vez
       const fechas = (itemsPorFactura.get(x.id_factura) ?? [])
-        .filter((i) => i.estado_pago === 'Pagado' && i.fecha_pago)
-        .map((i) => diaArgentina(String(i.fecha_pago)))
-        .sort()
+        .filter((i) => i.estado_pago === 'Pagado' && num(i.neto) > 0)
+        .map((i) => fechaAcreditacion(i, aprobadoPorId, cuotaPorId))
+      const conocidas = fechas.filter((x2): x2 is string => x2 !== null).sort()
+      const ultima = fechas.length > 0 && conocidas.length === fechas.length ? (conocidas.at(-1) ?? null) : null
       return {
         id_factura: x.id_factura,
         numero: numeroFactura(x.id_factura),
         periodo: { anio: x.anio, mes: x.mes },
-        anioPago: x.anio,
+        ultimaAcreditacion: ultima,
+        anioAcreditacion: fechas.length === 0 ? SIN_PAGOS : ultima ? ultima.slice(0, 4) : SIN_FECHA,
         alumno: x.alumno_nombre,
         curso: x.curso ?? 'Sin curso',
         anioCursado: anioDeCursado(x.curso),
@@ -375,19 +417,23 @@ export function listadoFacturas(
         saldo: num(x.saldo),
         estado: num(x.saldo) <= 0 ? 'Pago completo' : pagado > 0 ? 'Pago parcial' : 'Sin pago',
         vencida: num(x.saldo) > 0 && x.fecha_vencimiento.slice(0, 10) < hoy,
-        fechaPagoCompleto: num(x.saldo) <= 0 ? (fechas.at(-1) ?? null) : null,
       }
     })
 
+  const porAcreditacion = (a: string, b: string) => ordenAcreditacion(a) - ordenAcreditacion(b) || cmp(a, b)
   const opciones = {
-    aniosPago: [...new Set(candidatas.map((x) => x.anioPago))].sort((a, b) => a - b),
+    aniosAcreditacion: [...new Set(candidatas.map((x) => x.anioAcreditacion))].sort(porAcreditacion),
     aniosCursado: [...new Set(candidatas.map((x) => x.anioCursado))].sort(cmp),
   }
   const filas = candidatas
-    .filter((x) => (!f.anioPago || x.anioPago === Number(f.anioPago)) && (!f.anioCursado || x.anioCursado === f.anioCursado))
+    .filter(
+      (x) =>
+        (!f.anioAcreditacion || x.anioAcreditacion === f.anioAcreditacion) &&
+        (!f.anioCursado || x.anioCursado === f.anioCursado),
+    )
     .sort(
       (a, b) =>
-        a.anioPago - b.anioPago ||
+        porAcreditacion(a.anioAcreditacion, b.anioAcreditacion) ||
         cmp(a.anioCursado, b.anioCursado) ||
         clavePeriodo(a.periodo) - clavePeriodo(b.periodo) ||
         cmp(a.alumno, b.alumno),
@@ -395,8 +441,8 @@ export function listadoFacturas(
 
   const grupos = new Map<string, GrupoFacturas>()
   for (const x of filas) {
-    const clave = `${x.anioPago}|${x.anioCursado}`
-    const g = grupos.get(clave) ?? { clave, anioPago: x.anioPago, anioCursado: x.anioCursado, filas: [], total: 0, pagado: 0, saldo: 0 }
+    const clave = `${x.anioAcreditacion}|${x.anioCursado}`
+    const g = grupos.get(clave) ?? { clave, anioAcreditacion: x.anioAcreditacion, anioCursado: x.anioCursado, filas: [], total: 0, pagado: 0, saldo: 0 }
     g.filas.push(x)
     g.total = centavos(g.total + x.total)
     g.pagado = centavos(g.pagado + x.pagado)
@@ -484,6 +530,8 @@ export interface FiltrosDeportes {
 }
 
 export const SIN_INSCRIPCION = 'Sin inscripción en ese mes'
+/** El grupo existe pero no tiene ese dato cargado: no se completa con otro. */
+export const SIN_DATO_GRUPO = 'Sin dato en el grupo'
 
 export function listadoDeportes(d: DatosListados, f: FiltrosDeportes): ListadoItems {
   const facturaPorId = new Map(d.facturas.map((x) => [x.id_factura, x]))
@@ -506,7 +554,7 @@ export function listadoDeportes(d: DatosListados, f: FiltrosDeportes): ListadoIt
           detalle: i.descripcion.replace(/^Deporte:\s*/, ''),
           nivel: g?.nivel ?? SIN_INSCRIPCION,
           horario: g ? textoHorario(g) : SIN_INSCRIPCION,
-          profesor: usuario ? `${usuario.apellido}, ${usuario.nombre}` : g ? '—' : SIN_INSCRIPCION,
+          profesor: usuario ? `${usuario.apellido}, ${usuario.nombre}` : g ? SIN_DATO_GRUPO : SIN_INSCRIPCION,
           id_grupo: g?.id_grupo ?? null,
           id_docente: g?.id_docente ?? null,
           importe: num(i.neto),
@@ -549,6 +597,8 @@ export function listadoRecorridos(d: DatosListados, f: FiltrosRecorridos): Lista
       const fac = facturaPorId.get(i.id_factura)
       if (!fac || !enRangoMeses(fac, f.desde, f.hasta)) return []
       if (f.id_recorrido && i.id_recorrido !== Number(f.id_recorrido)) return []
+      // Descripción histórica del ítem; el nombre actual solo si faltara
+      const historica = i.descripcion.replace(/^Transporte:\s*/, '').trim()
       const r = i.id_recorrido === null ? undefined : recorridoPorId.get(i.id_recorrido)
       return [
         {
@@ -556,7 +606,7 @@ export function listadoRecorridos(d: DatosListados, f: FiltrosRecorridos): Lista
           periodo: { anio: fac.anio, mes: fac.mes },
           alumno: fac.alumno_nombre,
           factura: numeroFactura(fac.id_factura),
-          detalle: r?.nombre ?? i.descripcion.replace(/^Transporte:\s*/, ''),
+          detalle: historica || r?.nombre || 'Recorrido',
           nivel: '',
           horario: '',
           profesor: '',
@@ -589,13 +639,14 @@ export function tablaIngresos(l: ListadoIngresos): TablaReporte {
 
 export function tablaFacturas(l: ListadoFacturas): TablaReporte {
   return {
-    columnas: ['Año del pago (período)', 'Año de cursado', 'Período', 'Factura', 'Alumno', 'Curso', 'Total', 'Pagado', 'En revisión', 'Saldo', 'Estado'],
+    columnas: ['Año de última acreditación', 'Última acreditación', 'Año de cursado', 'Período facturado', 'Factura', 'Alumno', 'Curso (al facturar)', 'Total', 'Pagado', 'En revisión', 'Saldo', 'Estado'],
     filas: [
       ...l.filas.map((x) => [
-        String(x.anioPago), x.anioCursado, periodoTexto(x.periodo), x.numero, x.alumno, x.curso,
+        x.anioAcreditacion, x.ultimaAcreditacion ? x.ultimaAcreditacion.split('-').reverse().join('/') : '—',
+        x.anioCursado, periodoTexto(x.periodo), x.numero, x.alumno, x.curso,
         pesos(x.total), pesos(x.pagado), pesos(x.enRevision), pesos(x.saldo), `${x.estado}${x.vencida ? ' (vencida)' : ''}`,
       ]),
-      ['', '', '', '', '', 'Total', pesos(l.totales.total), pesos(l.totales.pagado), pesos(l.totales.enRevision), pesos(l.totales.saldo), ''],
+      ['', '', '', '', '', '', 'Total', pesos(l.totales.total), pesos(l.totales.pagado), pesos(l.totales.enRevision), pesos(l.totales.saldo), ''],
     ],
   }
 }
@@ -605,14 +656,14 @@ export function tablaItems(l: ListadoItems, tipo: 'deporte' | 'recorrido'): Tabl
   const fin = (x: FilaItem) => [pesos(x.importe), x.estado, pesos(x.saldo)]
   if (tipo === 'deporte')
     return {
-      columnas: ['Período', 'Alumno', 'Factura', 'Deporte', 'Nivel', 'Días y horario', 'Profesor', 'Importe', 'Estado de pago', 'Saldo'],
+      columnas: ['Período', 'Alumno', 'Factura', 'Deporte', 'Nivel (grupo actual)', 'Días y horario (grupo actual)', 'Profesor (grupo actual)', 'Importe', 'Estado de pago', 'Saldo'],
       filas: [
         ...l.filas.map((x) => [...base(x), x.detalle, x.nivel, x.horario, x.profesor, ...fin(x)]),
         ['', '', '', '', '', '', 'Total', pesos(l.totales.importe), '', pesos(l.totales.saldo)],
       ],
     }
   return {
-    columnas: ['Período', 'Alumno', 'Factura', 'Recorrido', 'Importe', 'Estado de pago', 'Saldo'],
+    columnas: ['Período', 'Alumno', 'Factura', 'Recorrido (como se facturó)', 'Importe', 'Estado de pago', 'Saldo'],
     filas: [
       ...l.filas.map((x) => [...base(x), x.detalle, ...fin(x)]),
       ['', '', '', 'Total', pesos(l.totales.importe), '', pesos(l.totales.saldo)],

@@ -1,14 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import {
   MENSAJES_LISTADOS,
+  SIN_DATO_GRUPO,
+  SIN_FECHA,
   SIN_INSCRIPCION,
+  SIN_PAGOS,
   anioDeCursado,
   diaArgentina,
   listadoDeportes,
   listadoFacturas,
   listadoIngresos,
   listadoRecorridos,
+  tablaFacturas,
   tablaIngresos,
+  tablaItems,
   validarRangoDias,
   validarRangoMeses,
 } from './reglasListadosPagos'
@@ -167,11 +172,12 @@ describe('HU63 y HU64: facturas completas e incompletas', () => {
     expect(anioDeCursado(null)).toBe('Sin curso')
   })
 
-  it('completas: solo las pagadas del todo, con su fecha de pago; Sin cargo aparte', () => {
+  it('completas: solo las pagadas del todo, con su última acreditación; Sin cargo aparte', () => {
     const l = listadoFacturas(datos, 'completas', { desde: '2026-11', hasta: '2026-12' }, '2026-12-20')
-    expect(l.filas.map((x) => [x.numero, x.estado, x.fechaPagoCompleto])).toEqual([
-      ['F-000001', 'Pago completo', '2026-11-30'],
-      ['F-000005', 'Pago completo', '2026-12-15'],
+    // F-000001: el comprobante se aprobó la noche del 30/11 en Argentina (01/12 en UTC)
+    expect(l.filas.map((x) => [x.numero, x.estado, x.ultimaAcreditacion, x.anioAcreditacion])).toEqual([
+      ['F-000001', 'Pago completo', '2026-11-30', '2026'],
+      ['F-000005', 'Pago completo', '2026-12-15', '2026'],
     ])
     expect(l.sinCargo).toBe(1)
     expect(l.totales).toMatchObject({ facturas: 2, total: 17000, pagado: 17000, saldo: 0 })
@@ -179,24 +185,122 @@ describe('HU63 y HU64: facturas completas e incompletas', () => {
 
   it('incompletas: pago parcial y sin pago, con saldo; En revisión no es pagado', () => {
     const l = listadoFacturas(datos, 'incompletas', { desde: '2026-11', hasta: '2026-12' }, '2026-12-20')
-    expect(l.filas.map((x) => [x.numero, x.estado, x.pagado, x.enRevision, x.saldo, x.vencida])).toEqual([
-      ['F-000003', 'Sin pago', 0, 0, 12000, true],
-      ['F-000002', 'Pago parcial', 10000, 1000, 2000, true],
+    expect(l.filas.map((x) => [x.numero, x.estado, x.pagado, x.enRevision, x.saldo, x.vencida, x.anioAcreditacion])).toEqual([
+      // la cuota la registró la administración el 05/11
+      ['F-000002', 'Pago parcial', 10000, 1000, 2000, true, '2026'],
+      ['F-000003', 'Sin pago', 0, 0, 12000, true, SIN_PAGOS],
     ])
-    expect(l.grupos.map((g) => [g.anioPago, g.anioCursado, g.filas.length, g.saldo])).toEqual([
-      [2026, 'Primario 3', 1, 12000],
-      [2026, 'Secundario 1', 1, 2000],
+    expect(l.grupos.map((g) => [g.anioAcreditacion, g.anioCursado, g.filas.length, g.saldo])).toEqual([
+      ['2026', 'Secundario 1', 1, 2000],
+      [SIN_PAGOS, 'Primario 3', 1, 12000],
     ])
     expect(l.totales.saldo).toBe(14000)
   })
 
-  it('filtra por año del pago y por año de cursado, y ofrece las opciones', () => {
+  it('filtra por año de última acreditación y por año de cursado, y ofrece las opciones', () => {
     const base = { desde: '2026-01', hasta: '2026-12' }
     expect(listadoFacturas(datos, 'incompletas', { ...base, anioCursado: 'Primario 3' }, '2026-12-20').filas.map((x) => x.numero)).toEqual(['F-000003'])
-    expect(listadoFacturas(datos, 'incompletas', { ...base, anioPago: '2027' }, '2026-12-20').filas).toEqual([])
-    expect(listadoFacturas(datos, 'incompletas', base, '2026-12-20').opciones).toEqual({ aniosPago: [2026], aniosCursado: ['Primario 3', 'Secundario 1'] })
+    expect(listadoFacturas(datos, 'incompletas', { ...base, anioAcreditacion: '2027' }, '2026-12-20').filas).toEqual([])
+    expect(listadoFacturas(datos, 'incompletas', { ...base, anioAcreditacion: SIN_PAGOS }, '2026-12-20').filas.map((x) => x.numero)).toEqual(['F-000003'])
+    expect(listadoFacturas(datos, 'incompletas', base, '2026-12-20').opciones).toEqual({ aniosAcreditacion: ['2026', SIN_PAGOS], aniosCursado: ['Primario 3', 'Secundario 1'] })
     // el período filtra por mes facturado
     expect(listadoFacturas(datos, 'incompletas', { desde: '2026-11', hasta: '2026-11' }, '2026-12-20').filas.map((x) => x.numero)).toEqual(['F-000002'])
+  })
+})
+
+describe('HU63 y HU64: año de última acreditación (fechas reales, no el período)', () => {
+  // Todas son facturas de DICIEMBRE 2026 (período facturado); los pagos se
+  // acreditan en fechas distintas.
+  const dic = (id: number, total: number, cobrado: number) =>
+    fac({ id_factura: id, id_alumno: id, mes: 12, alumno_nombre: `Alumno ${id}`, total, cobrado, saldo: total - cobrado })
+  const pago = (id: number, idFactura: number, items: number[], fecha: string) => ({
+    id_pago: id, id_factura: idFactura, estado: 'Aprobado' as const, monto_pagado: 0, fecha_revision: fecha, metodo_pago: 'Transferencia',
+    pago_items: items.map((i) => ({ id_item: i, importe: 0, activo: true })),
+  })
+  const anios: DatosListados = {
+    facturas: [dic(10, 10000, 10000), dic(11, 10000, 8000), dic(12, 10000, 0), dic(13, 10000, 10000), dic(14, 10000, 6000), dic(15, 10000, 10000)],
+    items: [
+      // F10: diciembre pagada en ENERO
+      item({ id_item: 101, id_factura: 10, neto: 10000, estado_pago: 'Pagado', id_pago: 20 }),
+      // F11: pagos parciales en DOS años y un concepto pendiente
+      item({ id_item: 111, id_factura: 11, concepto: 'Comedor', descripcion: 'Comedor', neto: 5000, estado_pago: 'Pagado', id_pago: 21 }),
+      item({ id_item: 112, id_factura: 11, concepto: 'Deporte', id_actividad: 1, descripcion: 'Deporte: Futbol', neto: 3000, estado_pago: 'Pagado', id_pago: 22 }),
+      item({ id_item: 113, id_factura: 11, concepto: 'Recorrido', id_recorrido: 1, descripcion: 'Transporte: Recorrido Norte', neto: 2000, saldo: 2000 }),
+      // F12: sin pagos
+      item({ id_item: 121, id_factura: 12, neto: 10000, saldo: 10000 }),
+      // F13: registro administrativo SIN fecha
+      item({ id_item: 131, id_factura: 13, id_cuota: 913, neto: 10000, estado_pago: 'Pagado' }),
+      // F14: un pago con fecha y otro sin fecha, y saldo pendiente
+      item({ id_item: 141, id_factura: 14, concepto: 'Comedor', descripcion: 'Comedor', neto: 3000, estado_pago: 'Pagado', id_pago: 23 }),
+      item({ id_item: 142, id_factura: 14, id_cuota: 914, neto: 3000, estado_pago: 'Pagado' }),
+      item({ id_item: 143, id_factura: 14, concepto: 'Deporte', id_actividad: 1, descripcion: 'Deporte: Futbol', neto: 4000, saldo: 4000 }),
+      // F15: aprobado el 31/12 a la noche en Argentina (01/01 en UTC)
+      item({ id_item: 151, id_factura: 15, neto: 10000, estado_pago: 'Pagado', id_pago: 24 }),
+    ],
+    pagos: [
+      pago(20, 10, [101], '2027-01-08T10:00:00-03:00'),
+      pago(21, 11, [111], '2026-12-20T12:00:00-03:00'),
+      pago(22, 11, [112], '2027-01-15T12:00:00-03:00'),
+      pago(23, 14, [141], '2026-12-28T12:00:00-03:00'),
+      pago(24, 15, [151], '2027-01-01T02:00:00Z'),
+    ],
+    cuotas: [
+      { id_cuota: 913, id_alumno: 13, anio: 2026, mes: 12, monto_base: 10000, recargo: 0, descuento: 0, estado: 'Pagada', fecha_pago: null, metodo_pago: null },
+      { id_cuota: 914, id_alumno: 14, anio: 2026, mes: 12, monto_base: 3000, recargo: 0, descuento: 0, estado: 'Pagada', fecha_pago: null, metodo_pago: null },
+    ],
+    alumnos: [],
+    inscDeportivas: [],
+    grupos: [],
+    // El recorrido 1 hoy se llama distinto de como se facturó
+    recorridos: [{ id_recorrido: 1, numero: 1, nombre: 'Recorrido Norte Ampliado' }],
+  }
+  const dicOnly = { desde: '2026-12', hasta: '2026-12' }
+
+  it('diciembre pagada en enero: queda en el año en que se saldó, con su período aparte', () => {
+    const l = listadoFacturas(anios, 'completas', { ...dicOnly, anioAcreditacion: '2027' }, '2027-01-20')
+    expect(l.filas.map((x) => [x.numero, x.periodo.mes, x.periodo.anio, x.ultimaAcreditacion, x.anioAcreditacion])).toEqual([
+      ['F-000010', 12, 2026, '2027-01-08', '2027'],
+    ])
+  })
+
+  it('aprobado la noche del 31/12 en Argentina cuenta en 2026, aunque en UTC sea 01/01', () => {
+    const l = listadoFacturas(anios, 'completas', dicOnly, '2027-01-20')
+    expect(l.filas.find((x) => x.numero === 'F-000015')).toMatchObject({ ultimaAcreditacion: '2026-12-31', anioAcreditacion: '2026' })
+  })
+
+  it('pagos parciales en distintos años: una sola fila, sin duplicar importes', () => {
+    const l = listadoFacturas(anios, 'incompletas', dicOnly, '2027-01-20')
+    const f11 = l.filas.filter((x) => x.numero === 'F-000011')
+    expect(f11).toHaveLength(1)
+    expect(f11.at(0)).toMatchObject({ pagado: 8000, saldo: 2000, ultimaAcreditacion: '2027-01-15', anioAcreditacion: '2027', estado: 'Pago parcial' })
+    expect(l.totales.facturas).toBe(l.filas.length)
+    expect(l.totales.pagado).toBe(8000 + 0 + 6000)
+  })
+
+  it('sin pagos y fecha desconocida: categorías explícitas, sin inferir el año del período', () => {
+    const inc = listadoFacturas(anios, 'incompletas', dicOnly, '2027-01-20')
+    expect(inc.filas.map((x) => [x.numero, x.anioAcreditacion, x.ultimaAcreditacion])).toEqual([
+      ['F-000011', '2027', '2027-01-15'],
+      ['F-000014', SIN_FECHA, null], // un pago con fecha y otro sin fecha: no se sabe cuál fue el último
+      ['F-000012', SIN_PAGOS, null],
+    ])
+    const comp = listadoFacturas(anios, 'completas', dicOnly, '2027-01-20')
+    expect(comp.filas.find((x) => x.numero === 'F-000013')).toMatchObject({ anioAcreditacion: SIN_FECHA, ultimaAcreditacion: null })
+    expect(comp.opciones.aniosAcreditacion).toEqual(['2026', '2027', SIN_FECHA])
+    expect(inc.opciones.aniosAcreditacion).toEqual(['2027', SIN_FECHA, SIN_PAGOS])
+  })
+
+  it('el CSV usa las etiquetas del criterio real', () => {
+    const t = tablaFacturas(listadoFacturas(anios, 'completas', dicOnly, '2027-01-20'))
+    expect(t.columnas.slice(0, 4)).toEqual(['Año de última acreditación', 'Última acreditación', 'Año de cursado', 'Período facturado'])
+    expect(t.filas.find((fila) => fila.includes('F-000010'))?.slice(0, 2)).toEqual(['2027', '08/01/2027'])
+    expect(t.filas.find((fila) => fila.includes('F-000013'))?.slice(0, 2)).toEqual([SIN_FECHA, '—'])
+  })
+
+  it('HU66: un recorrido renombrado se muestra como figura en la factura y se filtra por su identificador', () => {
+    const l = listadoRecorridos(anios, { ...dicOnly, id_recorrido: '1' })
+    expect(l.filas.map((x) => x.detalle)).toEqual(['Recorrido Norte'])
+    expect(tablaItems(l, 'recorrido').columnas).toContain('Recorrido (como se facturó)')
   })
 })
 
@@ -212,6 +316,13 @@ describe('HU65: pagos por deporte, nivel, horario y profesor', () => {
     ])
     expect(l.filas.find((x) => x.alumno === 'Tres, Caro')).toMatchObject({ nivel: SIN_INSCRIPCION, horario: SIN_INSCRIPCION, estado: 'Pendiente' })
     expect(l.filas.find((x) => x.alumno === 'Dos, Beto')).toMatchObject({ horario: 'Lunes · 17:00 a 18:00', estado: 'En revisión' })
+  })
+
+  it('nivel, horario y profesor se rotulan como datos actuales del grupo, y un dato faltante no se inventa', () => {
+    const columnas = tablaItems(listadoDeportes(datos, todo), 'deporte').columnas
+    expect(columnas).toEqual(expect.arrayContaining(['Nivel (grupo actual)', 'Días y horario (grupo actual)', 'Profesor (grupo actual)']))
+    const sinProfesor: DatosListados = { ...datos, grupos: datos.grupos.map((g) => (g.id_grupo === 1 ? { ...g, docentes: null } : g)) }
+    expect(listadoDeportes(sinProfesor, todo).filas.find((x) => x.alumno === 'Dos, Beto')?.profesor).toBe(SIN_DATO_GRUPO)
   })
 
   it('totales: lo en revisión no es cobrado', () => {
