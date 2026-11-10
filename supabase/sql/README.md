@@ -24,6 +24,9 @@ Cada archivo corresponde a una etapa de implementación de los requerimientos.
 | `etapa20_factura_pdf.sql` | TP Met. II · Parte 3 · RF13.1 (HU57) y parte del PDF de RF11.5 (HU50) | `fn_datos_factura`: datos históricos de la factura emitida para generar su PDF (padre actual, Admin o Directivo; solo `service_role`). No escribe ni modifica facturas |
 | `etapa21_avisos_facturacion.sql` | TP Met. II · Parte 3 · RF11.5 (HU50 etapa B), RF14.1 y RF14.2 (HU60 y HU61), RNF9 | Calendario de `feriados`, último día hábil, facturación programada (reutiliza `fn_generar_facturas`), destinatarios y composición de los correos, registro de envíos `avisos_envios` con reserva atómica, y el envoltorio `fn_generar_facturas_gestion` (solo Admin y Directivo). No programa el cron ni quita permisos |
 | `etapa22_cerrar_facturacion_directa.sql` | TP Met. II · Parte 3 · seguridad de HU50 | Quita a `anon` y `authenticated` el permiso de ejecutar `fn_generar_facturas`. Se corre **después** de integrar la web que usa el envoltorio |
+| `etapa23_vinculos_cuentas.sql` | TP Met. II · altas y vínculos (HU7, HU11, HU20 y acceso de HU41) | Una cuenta por legajo (índices únicos parciales en `alumnos.id_usuario` y `docentes.id_usuario`) y funciones de vinculación que comprueban en la base que opere Admin o Directivo y el rol de cada cuenta. **Aplicada** (informado por el equipo, 10/11). |
+| `etapa24_retirar_completar_usuario.sql` | TP Met. II · altas y vínculos (ajuste de etapa23) | Retira `fn_completar_usuario(uuid, text, text, text)`: nombre, apellido y rol de una cuenta nueva los guarda `crear-usuario` con su control de permisos. Inventario de solo lectura de las demás vías que escriben perfiles. Requiere `etapa23` |
+| `etapa25_usuarios_sin_escritura_anon.sql` | TP Met. II · seguimiento de etapa24 | Quita a `anon` (y a PUBLIC) INSERT, UPDATE, DELETE y TRUNCATE sobre `usuarios`, también por columna; `authenticated` y `service_role` conservan lo que tenían. No toca SELECT ni RLS |
 | `programar_avisos_cron.sql` / `desprogramar_avisos_cron.sql` | Activación manual del cron (HU50, HU60 y HU61) | Programan o quitan las tres corridas diarias con pg_cron y pg_net, usando secretos de Vault. Se corren a mano cuando el equipo decide activarlo |
 
 ## Etapa 17 — Facturación (HU50, etapa A)
@@ -335,6 +338,108 @@ desde SQL respondió HTTP 200 con `ok` (después de corregir la clave en Vault).
   a la vez (K1 a K3).
 - **K4:** detiene una sesión entre leer y actualizar la reserva; sin el
   `FOR UPDATE`, falla.
+
+## Etapa 23 — Altas y vinculación de cuentas y legajos (APLICADA)
+
+Reutiliza `alumnos.id_usuario` (cuenta propia del alumno), `alumnos.id_usuario_padre`
+(tutor) y `docentes.id_usuario`. No crea tablas, no toca RLS ni contraseñas.
+
+*Informado por el equipo (10/11):* `etapa23` aplicada en Supabase con sus cinco
+controles finales en `OK` (seis funciones, incluida `fn_completar_usuario`).
+`verificaciones/pruebas_etapa23.sql` → `PRUEBAS_ETAPA23_OK|9 controles (V1 a V9)`
+(la versión de la prueba que no ejercita `fn_completar_usuario`). **No volver a
+ejecutarla ni modificar el archivo:** los cambios van en etapas nuevas.
+
+**Funciones que quedan** (solo sesiones iniciadas; adentro exigen Admin o
+Directivo activo): `fn_vincular_tutor` (con confirmación para reemplazar),
+`fn_vincular_cuenta_alumno`, `fn_vincular_cuenta_docente` y
+`fn_crear_legajo_alumno` (un reintento con la misma cuenta devuelve el mismo
+legajo). `fn_completar_usuario` se retira en `etapa24`.
+
+*Verificado por la IA el 10/11 (no en Supabase):* PGlite con un esquema
+simulado: `etapa23` dos veces (idempotente), `pruebas_etapa23` 9 de 9 y, con una
+cuenta vinculada a dos legajos, se detiene sin crear índices.
+
+## Etapa 24 — Retirar `fn_completar_usuario` (ajuste incremental de etapa23)
+
+La única diferencia entre la `etapa23` aplicada y la versión final del bloque es
+`fn_completar_usuario`. Asignaba nombre, apellido y rol desde el navegador a una
+cuenta recién creada; ahora lo hace `crear-usuario`, que valida al operador y
+aplica la jerarquía (Directivo no crea Admin ni Directivo). Dejarla sería una
+segunda vía para asignar roles, así que `etapa24` la elimina con su firma exacta.
+Ninguna versión de la web la usa: la publicada no la conocía y la nueva ya no la
+llama. No toca las otras cinco funciones, los índices ni los datos.
+
+Al final informa (solo lectura) las demás vías que pueden escribir perfiles:
+- **I1:** funciones que escriben en `usuarios`;
+- **I2:** triggers sobre `usuarios` y `auth.users`. Un trigger de Auth puede crear
+  el perfil por defecto: `crear-usuario` lo actualiza por id y relee el rol;
+- **I3:** permisos de `anon` y `authenticated` para escribir `usuarios` por la API.
+  Sin RLS (CLAUDE.md 3.1), si están en `true` una sesión puede cambiar perfiles y
+  roles salteando la jerarquía: es la **limitación aceptada**, no se corrige acá.
+  La web nueva ya no escribe roles desde el navegador; la publicada todavía lo
+  hace después de cada alta (con los mismos valores) hasta que se integre el PR.
+
+*Verificado por la IA el 10/11 (no en Supabase):* PGlite partiendo de la `etapa23`
+aplicada: `etapa24` dos veces, `fn_completar_usuario` ya no existe, datos y
+vínculos sin cambios, `pruebas_etapa23` sigue en 9 de 9; sin `etapa23` se detiene
+(`ETAPA24_REQUIERE_ETAPA23`).
+
+*Informado por el equipo (10/11):* `etapa24` ejecutada sin errores. El editor
+mostró solo el inventario final: **`anon` y `authenticated` tienen INSERT, UPDATE
+y DELETE sobre `usuarios`**. Los cuatro controles finales quedan **por comprobar**
+con `verificaciones/verificar_etapa24.sql` (solo lectura; no hace falta repetir
+la migración).
+
+## Etapa 25 — Quitar a `anon` la escritura en `usuarios`
+
+Ningún flujo sin sesión escribe en `usuarios`: el sitio público, el login, el
+portal y la app solo la **leen** y con sesión; las altas y cambios de la gestión
+web van con sesión (`authenticated`); las Edge Functions usan `service_role`; un
+trigger de Auth, si existe, no corre como `anon`. Por eso `etapa25` retira a
+`anon` (y a PUBLIC, de quien `anon` hereda) INSERT, UPDATE, DELETE y TRUNCATE
+sobre `usuarios`, incluidos permisos por columna. **No toca SELECT.**
+`authenticated` y `service_role` conservan exactamente lo que tenían: se registra
+antes de revocar y, si un permiso les llegaba solo por PUBLIC, se les da directo.
+
+**Limitación que sigue (CLAUDE.md 3.1):** sin RLS, cualquier sesión iniciada
+puede escribir `usuarios` por la API, incluido el rol. Esto **no** resuelve el
+aislamiento completo; solo cierra la escritura sin sesión.
+
+**Cómo:** `etapa25_usuarios_sin_escritura_anon.sql` (idempotente). Después,
+`verificaciones/verificar_etapa25.sql` (solo lectura): cuatro controles en `OK` y
+el detalle por rol. Se puede ejecutar en cualquier momento: no depende de la web
+ni de `crear-usuario`.
+
+*Verificado por la IA el 10/11 (no en Supabase):* PGlite con tres situaciones de
+permisos (directos como en Supabase, heredados de PUBLIC y por columna para
+`anon`), dos ejecuciones cada una: `anon` no puede insertar, actualizar ni borrar
+y sigue pudiendo leer; `authenticated` sigue actualizando y `service_role` sigue
+insertando.
+
+### Compatibilidad entre versiones
+| Combinación | ¿Funciona? |
+|---|---|
+| Web publicada + `crear-usuario` nueva (con o sin `etapa24`) | **Sí.** Mismo cuerpo y CORS; el correo se guarda como llega, así que la web publicada lo encuentra después del alta y repite nombre y rol con los mismos valores. El docente lo sigue registrando la web publicada (la función ya no crea uno vacío). Cambio visible: un Directivo ya no puede crear Admin ni Directivo. |
+| Web nueva + `crear-usuario` publicada | **No.** La web nueva espera `id_usuario` en la respuesta y manda el docente en la misma alta. |
+| Web nueva + `etapa24` | Sí: la web nueva no usa `fn_completar_usuario`. |
+
+### Secuencia de despliegue desde el estado real (etapa23 ya aplicada)
+1. ~~`etapa24`~~ ejecutada (informado). Comprobar sus controles con
+   `verificaciones/verificar_etapa24.sql` (cuatro `OK`).
+   Después, `etapa25_usuarios_sin_escritura_anon.sql` y
+   `verificaciones/verificar_etapa25.sql` (cuatro `OK`).
+2. **Respaldo de `crear-usuario`:** el código publicado (el que aportó el equipo)
+   guardado fuera del repo, para volver atrás si hiciera falta.
+3. **Publicar `crear-usuario`** con `supabase/functions/crear-usuario/index.ts`,
+   **Verify JWT activado**. Sin secrets nuevos.
+4. **Control con la web publicada** (todavía la anterior), con datos marcados
+   como prueba: crear un Tutor con su alumno y un Docente; comprobar nombre, rol,
+   un solo registro de docente y que con un Directivo no se puede crear un Admin.
+   Si algo falla, volver a pegar el respaldo del paso 2.
+5. **Recorrido manual** del bloque con la web de la rama en local
+   (`npm run dev` en `frontend/`: usa la misma base y la función ya publicada).
+6. **Commit, push, un único PR e integración** (Vercel publica la web nueva).
 
 ## Verificaciones de solo lectura para la coevaluación
 

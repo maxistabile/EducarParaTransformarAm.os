@@ -1,6 +1,31 @@
-# Edge Function para Crear Usuarios
+# Edge Function `crear-usuario` (corregida el 10/11/2026)
 
-Esta Edge Function permite crear usuarios automáticamente desde el panel de administración sin necesidad de copiar UUIDs manualmente.
+Alta de cuentas desde la gestión web. **La versión del repo reemplaza a la
+publicada y hay que volver a publicarla** (secuencia en
+`supabase/sql/README.md`, Etapa 24: `etapa23` ya está aplicada; primero
+`etapa24`, después esta función y recién después la web nueva).
+
+Comparada el 10/11 con el código publicado que aportó el equipo (importaba
+supabase-js desde esm.sh y no validaba nada): mismo cuerpo y CORS, el correo se
+guarda como llega y la respuesta suma `id_usuario`, así que **la web publicada
+sigue funcionando** con esta versión.
+
+Qué cambió respecto de la versión publicada hasta ahora:
+- valida la sesión con `auth.getUser(token)` y lee el perfil real del operador:
+  tiene que ser Admin o Directivo activo (el rol del cuerpo no autoriza nada);
+- valida los datos y el rol de la cuenta nueva: Admin crea cualquier rol;
+  Directivo crea Docente, Padre o Alumno;
+- si el correo ya existe, responde `USR_CORREO_EXISTE` y no toca esa cuenta;
+- comprueba cada escritura y, si una falla, deshace lo que creó esa solicitud:
+  nunca responde `ok` con un alta incompleta;
+- ya no crea un docente con DNI vacío: lo crea solo si recibe sus datos
+  (`docente: { dni, especialidad, titulo }`), en la misma alta.
+
+Respuesta: `{ ok: true, id_usuario }` o `{ ok: false, codigo, revertido? }`.
+Publicarla con **Verify JWT activado**. Antes, guardar una copia del código
+publicado fuera del repo para poder volver atrás.
+
+## Despliegue (configuración inicial, ya hecha en el proyecto)
 
 ## 🚀 Despliegue
 
@@ -81,8 +106,8 @@ Comprobantes de transferencia, URLs firmadas y comprobante de pago en PDF.
 Código: `supabase/functions/pagos/index.ts` (un solo archivo, para poder
 pegarlo en el dashboard).
 
-> **No redesplegar `crear-usuario`** desde este repo: su `index.ts` está casi
-> entero comentado y no coincide con la función que funciona (CLAUDE.md, 11).
+> `crear-usuario` se publica con la versión corregida del repo (ver arriba y la
+> secuencia de la Etapa 24 en `supabase/sql/README.md`).
 
 ## Antes
 

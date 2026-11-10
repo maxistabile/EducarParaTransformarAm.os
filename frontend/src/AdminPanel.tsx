@@ -54,6 +54,18 @@ import GestionComprobantes from './gestion/GestionComprobantes'
 import GestionListadosPagos from './gestion/GestionListadosPagos'
 import { colorEstadoCobro, mensajeErrorFacturacion } from './reglasFacturacion'
 import { esCuotaACobrar, etiquetaEstadoCuota, netoCuota } from './reglasCuotas'
+// Altas y vínculos de cuentas y legajos (HU7, HU11, HU20 y acceso de HU41)
+import { CuentaDocente, VinculosAlumno, VinculosUsuario } from './gestion/Vinculos'
+import { ServicioVinculos } from './servicios/ServicioVinculos'
+import type { DatosCuenta, LegajoAlumno as LegajoSinCuenta } from './servicios/ServicioVinculos'
+import {
+  buscarTutores,
+  faltantesAlumno,
+  nombreUsuario,
+  planCuentaNueva,
+  validarCuentaNueva,
+} from './reglasVinculos'
+import type { UsuarioBasico } from './reglasVinculos'
 
 // ═══════════════════════════════════════════════════════════════
 //  TIPOS
@@ -105,6 +117,9 @@ interface Alumno {
   fecha_nacimiento?: string | null
   obra_social?: string | null
   id_curso?: number | null
+  // Vínculos (ya vienen en select('*'))
+  id_usuario?: string | null
+  id_usuario_padre?: string | null
 }
 
 interface Docente {
@@ -1057,6 +1072,16 @@ function GestionUsuarios({
   // TP Metodología II · RF2.1 — datos del docente al registrarlo
   const [docenteForm, setDocenteForm] = useState<FormDocente>(DOCENTE_VACIO)
   const [msg, setMsg] = useState('')
+  // Segundo hijo: tutor que ya tiene cuenta (se elige; nunca se toma la
+  // primera coincidencia) — no se crea otro tutor ni se tocan sus datos
+  const [tutorExistente, setTutorExistente] = useState(false)
+  const [busquedaTutor, setBusquedaTutor] = useState('')
+  const [tutorElegido, setTutorElegido] = useState<UsuarioBasico | null>(null)
+  // Usuario Alumno: legajo nuevo o uno existente sin cuenta (sin tutor)
+  const [legajoModo, setLegajoModo] = useState<'nuevo' | 'existente'>('nuevo')
+  const [legajosLibres, setLegajosLibres] = useState<LegajoSinCuenta[] | null>(null)
+  const [legajoElegido, setLegajoElegido] = useState('')
+  const [vinculosDe, setVinculosDe] = useState<UsuarioPanel | null>(null)
 
   const load = useCallback(async () => {
     const [{ data: usuariosData }, { data: cursosData }] = await Promise.all([
@@ -1103,101 +1128,59 @@ function GestionUsuarios({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill, onPrefillConsumed])
 
-  // Crea el usuario vía edge function y luego fuerza nombre/apellido/rol en la
-  // fila de `usuarios`, porque el backend desplegado no respeta esos valores
-  // (los crea sin nombre y con un rol por defecto). Devuelve el id_usuario.
-  const crearUsuario = async (datos: {
-    email: string
-    password: string
-    nombre: string
-    apellido: string
-    rol: string
-  }): Promise<{ error: string | null; id: string | null }> => {
-    const { error } = await supabase.functions.invoke('crear-usuario', {
-      body: datos,
-    })
-    if (error) return { error: error.message, id: null }
-
-    const { data: usuarioCreado } = await supabase
-      .from('usuarios')
-      .select('id_usuario')
-      .eq('email', datos.email)
-      .single()
-    if (!usuarioCreado?.id_usuario) {
-      return {
-        error:
-          'No se encontró el usuario recién creado para completar sus datos.',
-        id: null,
-      }
-    }
-    const { error: updErr } = await supabase
-      .from('usuarios')
-      .update({
-        nombre: datos.nombre,
-        apellido: datos.apellido,
-        rol: datos.rol,
-      })
-      .eq('id_usuario', usuarioCreado.id_usuario)
-    if (updErr) {
-      return {
-        error: 'no se pudo guardar nombre/rol del usuario: ' + updErr.message,
-        id: usuarioCreado.id_usuario,
-      }
-    }
-    return { error: null, id: usuarioCreado.id_usuario }
+  // Crea la cuenta con crear-usuario: la función valida al operador y el
+  // rol, guarda nombre, apellido y rol (ya no se corrigen desde acá) y, para
+  // un Docente, también su registro en `docentes`. Si algo falla, deshace el
+  // alta y no se informa como éxito. Devuelve el id_usuario.
+  const crearUsuario = async (datos: DatosCuenta): Promise<{ error: string | null; id: string | null }> => {
+    const r = await ServicioVinculos.altaCuenta(datos)
+    return r.ok ? { error: null, id: r.dato.id_usuario } : { error: r.mensaje, id: null }
   }
 
   // Crea el usuario y el registro del alumno asociados a un tutor recién
   // creado. Antes vivía mezclado dentro de handleCreate; se separa para que
   // "crear un tutor" y "crear el alumno asociado" sean pasos independientes,
   // que se puedan leer, probar y reutilizar por separado.
+  // La cuenta del alumno se busca antes de crearla y el legajo se da de
+  // alta en la base (fn_crear_legajo_alumno, valida el rol del tutor): un
+  // reintento reutiliza la cuenta y el legajo en lugar de duplicarlos.
   const crearAlumnoParaTutor = async (
     idUsuarioTutor: string | null,
+    tutorYaExistia = false,
   ): Promise<{ error: string | null }> => {
     const dni = alumnoForm.dni.trim()
-    const emailAlumno = `${dni}@alumno.local`
-    const { error: errAlumno, id: idAlumno } = await crearUsuario({
-      email: emailAlumno,
+    const previo = tutorYaExistia ? '⚠️ ' : '⚠️ Tutor creado, pero '
+    const cuenta = await ServicioVinculos.crearCuenta({
+      email: `${dni}@alumno.local`,
       password: dni,
       nombre: alumnoForm.nombre,
       apellido: alumnoForm.apellido,
       rol: 'Alumno',
     })
-    if (errAlumno) {
+    if (!cuenta.ok) {
+      return { error: `${previo}no se pudo crear la cuenta del alumno: ${cuenta.mensaje}` }
+    }
+    const legajo = await ServicioVinculos.crearLegajoAlumno(
+      {
+        nombre: alumnoForm.nombre,
+        apellido: alumnoForm.apellido,
+        dni,
+        fecha_nacimiento: alumnoForm.fecha_nacimiento,
+        id_curso: alumnoForm.id_curso,
+        obra_social: alumnoForm.obra_social,
+        direccion: alumnoForm.direccion,
+        telefono: alumnoForm.telefono,
+        email: alumnoForm.email,
+      },
+      cuenta.dato.id_usuario,
+      idUsuarioTutor,
+    )
+    if (!legajo.ok) {
       return {
-        error:
-          '⚠️ Tutor creado, pero hubo un error al crear el usuario del alumno: ' +
-          errAlumno,
+        error: `${previo}la cuenta del alumno quedó creada y no se registró el legajo: ${legajo.mensaje} Reintentá: no se duplica.`,
       }
     }
-
-    const { data: alumnoCreado, error: alErr } = await supabase
-      .from('alumnos')
-      .insert([
-        {
-          nombre: alumnoForm.nombre.trim(),
-          apellido: alumnoForm.apellido.trim(),
-          dni,
-          fecha_nacimiento: alumnoForm.fecha_nacimiento || null,
-          id_curso: alumnoForm.id_curso ? Number(alumnoForm.id_curso) : null,
-          id_usuario: idAlumno,
-          id_usuario_padre: idUsuarioTutor,
-          obra_social: alumnoForm.obra_social || null,
-          // TP Metodología II · RF1 (el legajo lo asigna la base)
-          direccion: alumnoForm.direccion.trim() || null,
-          telefono: alumnoForm.telefono.trim() || null,
-          email: alumnoForm.email.trim() || null,
-        },
-      ])
-      .select('id_alumno')
-      .single()
-    if (alErr) {
-      return {
-        error:
-          '⚠️ Usuarios creados, pero hubo un error al registrar el alumno: ' +
-          alErr.message,
-      }
-    }
+    const alumnoCreado = { id_alumno: legajo.dato.id_alumno }
     // Marcar la preinscripción de origen como registrada
     if (idInscripcionOrigen !== null && alumnoCreado?.id_alumno) {
       const { error: insErr } = await supabase
@@ -1211,40 +1194,6 @@ function GestionUsuarios({
             insErr.message,
         }
       }
-    }
-    return { error: null }
-  }
-
-  // Crea el registro en `docentes` asociado a un usuario recién creado con
-  // rol Docente (la fila no se crea sola desde el backend). Separada del
-  // resto de handleCreate por la misma razón que crearAlumnoParaTutor.
-  const crearRegistroDocente = async (
-    idUsuario: string | null,
-  ): Promise<{ error: string | null }> => {
-    const { error: docErr } = await supabase.from('docentes').insert([
-      {
-        id_usuario: idUsuario,
-        // TP Metodología II · RF2.1 (el legajo lo asigna la base)
-        dni: docenteForm.dni.trim(),
-        especialidad: docenteForm.especialidad.trim(),
-        titulo: docenteForm.titulo.trim() || null,
-        activo: true,
-      },
-    ])
-    if (docErr) {
-      return {
-        error:
-          '⚠️ Usuario creado, pero no se pudo registrar en Docentes: ' +
-          mensajeErrorDocente(docErr.message),
-      }
-    }
-    // El teléfono del docente vive en `usuarios` (columna ya existente)
-    const tel = docenteForm.telefono.trim()
-    if (tel && idUsuario) {
-      await supabase
-        .from('usuarios')
-        .update({ telefono: tel })
-        .eq('id_usuario', idUsuario)
     }
     return { error: null }
   }
@@ -1264,27 +1213,84 @@ function GestionUsuarios({
         return
       }
       const dni = alumnoForm.dni.trim()
-      const [{ data: alumnoExiste }, { data: usuarioAlumnoExiste }] =
-        await Promise.all([
-          supabase.from('alumnos').select('id_alumno').eq('dni', dni).maybeSingle(),
-          supabase
-            .from('usuarios')
-            .select('id_usuario')
-            .eq('email', `${dni}@alumno.local`)
-            .maybeSingle(),
-        ])
+      const { data: alumnoExiste } = await supabase
+        .from('alumnos')
+        .select('id_alumno')
+        .eq('dni', dni)
+        .maybeSingle()
       if (alumnoExiste) {
-        setMsg('Ya existe un alumno registrado con ese DNI.')
+        setMsg('Ya existe un alumno registrado con ese DNI. Asociale el tutor desde Alumnos → Vínculos.')
         setLoading(false)
         return
       }
-      if (usuarioAlumnoExiste) {
-        setMsg(
-          `Ya existe el usuario ${dni}@alumno.local. Revisalo en la lista antes de registrar.`,
-        )
+      // Segundo hijo: solo se crean la cuenta y el legajo del alumno
+      if (tutorExistente) {
+        if (!tutorElegido) {
+          setMsg('Elegí el tutor existente de la lista.')
+          setLoading(false)
+          return
+        }
+        const { error } = await crearAlumnoParaTutor(tutorElegido.id_usuario, true)
+        setLoading(false)
+        load()
+        if (error) {
+          setMsg(error)
+          return
+        }
+        setMsg(`✅ Alumno creado y asociado a ${nombreUsuario(tutorElegido)}. Los datos del tutor no cambiaron.`)
+        reiniciarFormulario()
+        return
+      }
+      // Tutor nuevo: si el correo ya existe, no se crea otro ni se pisa
+      const correo = form.email.trim().toLowerCase()
+      const yaExiste = usuarios.find((u) => (u.email ?? '').toLowerCase() === correo)
+      if (yaExiste) {
+        const plan = planCuentaNueva(yaExiste, 'Padre', false)
+        setMsg(plan.accion === 'error' ? plan.mensaje : 'Ya existe una cuenta con ese correo.')
         setLoading(false)
         return
       }
+    }
+
+    // Usuario Alumno: cuenta + legajo (nuevo o existente sin cuenta), sin tutor
+    if (form.rol === 'Alumno') {
+      const errorCuenta = validarCuentaNueva(form)
+      const errorLegajo =
+        legajoModo === 'existente'
+          ? legajoElegido ? null : 'Elegí el legajo existente sin cuenta.'
+          : validarAlumno({ ...FORM_ALUMNO_VACIO, ...alumnoForm, nombre: form.nombre, apellido: form.apellido })
+      if (errorCuenta || errorLegajo) {
+        setMsg(errorCuenta ?? errorLegajo ?? '')
+        setLoading(false)
+        return
+      }
+      const cuenta = await ServicioVinculos.crearCuenta({ ...form, rol: 'Alumno' })
+      if (!cuenta.ok) {
+        setMsg('Error: ' + cuenta.mensaje)
+        setLoading(false)
+        return
+      }
+      const vinculo =
+        legajoModo === 'existente'
+          ? await ServicioVinculos.vincularCuentaAlumno(Number(legajoElegido), cuenta.dato.id_usuario)
+          : await ServicioVinculos.crearLegajoAlumno(
+              { ...alumnoForm, nombre: form.nombre, apellido: form.apellido },
+              cuenta.dato.id_usuario,
+              null,
+            )
+      setLoading(false)
+      load()
+      if (!vinculo.ok) {
+        setMsg(`⚠️ La cuenta quedó creada, pero no se vinculó el legajo: ${vinculo.mensaje} Reintentá: no se duplica.`)
+        return
+      }
+      setMsg(
+        cuenta.dato.existente
+          ? '✅ Ya existía una cuenta Alumno libre con ese correo: se vinculó al legajo sin cambiar sus credenciales.'
+          : '✅ Usuario Alumno creado y vinculado a su legajo (sin tutor).',
+      )
+      reiniciarFormulario()
+      return
     }
 
     // TP Metodología II · RF2.1 — mismo criterio para el docente
@@ -1313,6 +1319,18 @@ function GestionUsuarios({
       nombre: form.nombre,
       apellido: form.apellido,
       rol: form.rol,
+      // TP Metodología II · RF2.1: el docente se registra en la misma alta
+      // (el legajo lo asigna la base; el teléfono vive en `usuarios`)
+      ...(form.rol === 'Docente'
+        ? {
+            telefono: docenteForm.telefono.trim(),
+            docente: {
+              dni: docenteForm.dni.trim(),
+              especialidad: docenteForm.especialidad.trim(),
+              titulo: docenteForm.titulo.trim(),
+            },
+          }
+        : {}),
     })
     if (errUser) {
       setMsg('Error: ' + errUser)
@@ -1330,21 +1348,17 @@ function GestionUsuarios({
       }
     }
 
-    if (form.rol === 'Docente') {
-      const { error } = await crearRegistroDocente(idUsuario)
-      if (error) {
-        setMsg(error)
-        setLoading(false)
-        load()
-        return
-      }
-    }
-
     setMsg(
       form.rol === 'Padre'
         ? '✅ Tutor y alumno (usuario + registro) creados correctamente.'
         : '✅ Usuario creado correctamente.',
     )
+    reiniciarFormulario()
+    load()
+    setLoading(false)
+  }
+
+  function reiniciarFormulario() {
     setForm({
       email: '',
       password: '',
@@ -1356,9 +1370,19 @@ function GestionUsuarios({
     setIdInscripcionOrigen(null)
     setNivelSolicitado('')
     setDocenteForm(DOCENTE_VACIO)
+    setTutorExistente(false)
+    setTutorElegido(null)
+    setBusquedaTutor('')
+    setLegajoModo('nuevo')
+    setLegajoElegido('')
     setShowForm(false)
-    load()
-    setLoading(false)
+  }
+
+  const cargarLegajosLibres = () => {
+    ServicioVinculos.alumnosSinCuenta().then((r) => {
+      if (r.ok) setLegajosLibres(r.dato)
+      else setMsg(r.mensaje)
+    })
   }
 
 
@@ -1408,6 +1432,7 @@ function GestionUsuarios({
             onSubmit={handleCreate}
             style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}
           >
+            {!(form.rol === 'Padre' && tutorExistente) && (<>
             <div>
               <span className={LABEL_CLASS}>
                 Nombre
@@ -1463,6 +1488,7 @@ function GestionUsuarios({
                 }
               />
             </div>
+            </>)}
             <div>
               <span className={LABEL_CLASS}>
                 Rol
@@ -1470,13 +1496,15 @@ function GestionUsuarios({
               <select
                 className={`${INPUT_CLASS} appearance-none`}
                 value={form.rol}
-                onChange={(e) =>
+                onChange={(e) => {
                   setForm((prev) => ({ ...prev, rol: e.target.value }))
-                }
+                  if (e.target.value === 'Alumno' && legajosLibres === null) cargarLegajosLibres()
+                }}
               >
                 <option value='Docente'>Docente</option>
-                <option value='Directivo'>Directivo</option>
-                <option value='Admin'>Admin</option>
+                {/* Las cuentas de gestión las crea un Admin (lo controla crear-usuario) */}
+                {rolActor === 'Admin' && <option value='Directivo'>Directivo</option>}
+                {rolActor === 'Admin' && <option value='Admin'>Admin</option>}
                 <option value='Alumno'>Alumno</option>
                 <option value='Padre'>Tutor</option>
               </select>
@@ -1491,6 +1519,52 @@ function GestionUsuarios({
                   marginTop: 4,
                 }}
               >
+                <label className='flex items-center gap-2 text-[13px] font-bold text-text mb-4'>
+                  <input
+                    type='checkbox'
+                    checked={tutorExistente}
+                    onChange={(e) => {
+                      setTutorExistente(e.target.checked)
+                      setTutorElegido(null)
+                    }}
+                  />
+                  El tutor ya tiene cuenta (segundo hijo): no crear otro tutor
+                </label>
+                {tutorExistente && (
+                  <div className='mb-5'>
+                    <span className={LABEL_CLASS}>Buscar tutor por correo, nombre o apellido</span>
+                    <input
+                      className={INPUT_CLASS}
+                      value={busquedaTutor}
+                      placeholder='Al menos 2 letras'
+                      onChange={(e) => {
+                        setBusquedaTutor(e.target.value)
+                        setTutorElegido(null)
+                      }}
+                    />
+                    {tutorElegido ? (
+                      <div className='mt-2 text-[13px] font-bold text-green'>
+                        Tutor elegido: {nombreUsuario(tutorElegido)} · {tutorElegido.email}{' '}
+                        <button type='button' className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[4px] px-2 text-xs font-extrabold cursor-pointer' onClick={() => { setTutorElegido(null) }}>
+                          Cambiar
+                        </button>
+                      </div>
+                    ) : (
+                      <ul className='mt-2 flex flex-col gap-1 list-none p-0'>
+                        {buscarTutores(usuarios, busquedaTutor).map((u) => (
+                          <li key={u.id_usuario}>
+                            <button type='button' className='w-full text-left bg-white border border-border rounded-lg py-[6px] px-3 text-[13px] cursor-pointer hover:bg-purpleLight' onClick={() => { setTutorElegido(u) }}>
+                              {nombreUsuario(u)} · <span className='text-textMuted'>{u.email}</span>
+                            </button>
+                          </li>
+                        ))}
+                        {busquedaTutor.trim().length >= 2 && buscarTutores(usuarios, busquedaTutor).length === 0 && (
+                          <li className='text-[13px] text-textMuted'>No hay tutores activos que coincidan.</li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
+                )}
                 <div className='text-[15px] font-extrabold text-text mb-5'>
                   Datos del alumno asociado
                 </div>
@@ -1667,6 +1741,55 @@ function GestionUsuarios({
               </div>
             )}
 
+            {form.rol === 'Alumno' && (
+              <div style={{ gridColumn: '1/-1', borderTop: '1px solid #E8E6F5', paddingTop: 16, marginTop: 4 }}>
+                <div className='text-[15px] font-extrabold text-text mb-3'>Legajo del alumno</div>
+                <div className='flex gap-4 mb-4 text-[13px] font-bold text-text'>
+                  <label className='flex items-center gap-2'>
+                    <input type='radio' checked={legajoModo === 'nuevo'} onChange={() => { setLegajoModo('nuevo') }} />
+                    Crear el legajo
+                  </label>
+                  <label className='flex items-center gap-2'>
+                    <input type='radio' checked={legajoModo === 'existente'} onChange={() => { setLegajoModo('existente') }} />
+                    Elegir un legajo existente sin cuenta
+                  </label>
+                </div>
+                {legajoModo === 'existente' ? (
+                  <select className={`${INPUT_CLASS} appearance-none`} value={legajoElegido} onChange={(e) => { setLegajoElegido(e.target.value) }}>
+                    <option value=''>{legajosLibres === null ? 'Cargando…' : 'Seleccionar legajo'}</option>
+                    {(legajosLibres ?? []).map((l) => (
+                      <option key={l.id_alumno} value={l.id_alumno}>
+                        {l.legajo ?? '—'} · {l.apellido}, {l.nombre} · DNI {l.dni ?? '—'}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div>
+                      <span className={LABEL_CLASS}>DNI</span>
+                      <input className={INPUT_CLASS} value={alumnoForm.dni} onChange={(e) => { setAlumnoForm((prev) => ({ ...prev, dni: e.target.value })) }} />
+                    </div>
+                    <div>
+                      <span className={LABEL_CLASS}>Fecha de nacimiento</span>
+                      <input type='date' className={INPUT_CLASS} value={alumnoForm.fecha_nacimiento} onChange={(e) => { setAlumnoForm((prev) => ({ ...prev, fecha_nacimiento: e.target.value })) }} />
+                    </div>
+                    <div>
+                      <span className={LABEL_CLASS}>Curso</span>
+                      <select className={`${INPUT_CLASS} appearance-none`} value={alumnoForm.id_curso} onChange={(e) => { setAlumnoForm((prev) => ({ ...prev, id_curso: e.target.value })) }}>
+                        <option value=''>Seleccionar curso</option>
+                        {cursos.map((c) => (
+                          <option key={c.id_curso} value={c.id_curso}>{c.nivel} — {c.grado_anio} "{c.division}"</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: 12, fontSize: 12, color: '#6B6B8A', background: '#EEE9FF', borderRadius: 8, padding: '8px 12px' }}>
+                  No se crea un tutor desde acá: se asocia después en Alumnos → Vínculos. La contraseña inicial debe tener al menos 8 caracteres.
+                </div>
+              </div>
+            )}
+
             {form.rol === 'Docente' && (
               <div
                 style={{
@@ -1837,6 +1960,13 @@ function GestionUsuarios({
                   </span>
                 </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
+                  <div className='flex items-center gap-2'>
+                  <button
+                    className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                    onClick={() => { setVinculosDe(u) }}
+                  >
+                    Vínculos
+                  </button>
                   {puedeGestionar(u.rol) ? (
                     <button
                       className={
@@ -1851,12 +1981,14 @@ function GestionUsuarios({
                   ) : (
                     <span className='text-[11px] text-textMuted'>—</span>
                   )}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {vinculosDe && <VinculosUsuario usuario={vinculosDe} onCerrar={() => { setVinculosDe(null) }} />}
     </div>
   )
 }
@@ -1929,6 +2061,7 @@ function GestionAlumnos() {
     null,
   )
   const [form, setForm] = useState<FormAlumno>(FORM_ALUMNO_VACIO)
+  const [vinculosDe, setVinculosDe] = useState<Alumno | null>(null)
 
   const load = useCallback(async () => {
     const [{ data: al }, { data: cu }] = await Promise.all([
@@ -1987,12 +2120,24 @@ function GestionAlumnos() {
       return
     }
 
-    // Buscar usuario padre por email
-    const { data: padre } = await supabase
-      .from('usuarios')
-      .select('id_usuario')
-      .eq('email', form.email_padre)
-      .single()
+    // Buscar usuario padre por email: si se indicó, tiene que ser un tutor
+    const emailPadre = form.email_padre.trim()
+    const { data: padre } = emailPadre
+      ? await supabase
+          .from('usuarios')
+          .select('id_usuario, rol')
+          .eq('email', emailPadre)
+          .maybeSingle()
+      : { data: null }
+    if (emailPadre && padre?.rol !== 'Padre') {
+      setMsg(
+        padre
+          ? 'Ese correo es de una cuenta que no es de tutor. No se asoció.'
+          : 'No hay una cuenta de tutor con ese correo. Dejalo vacío y asocialo después desde Vínculos.',
+      )
+      setLoading(false)
+      return
+    }
     const { error } = await supabase.from('alumnos').insert([
       {
         nombre: form.nombre.trim(),
@@ -2433,6 +2578,9 @@ function GestionAlumnos() {
                   <span style={badge(a.activo ? '#27AE60' : '#E74C3C')}>
                     {a.activo ? 'Activo' : 'Inactivo'}
                   </span>
+                  {faltantesAlumno(a).map((f) => (
+                    <div key={f} className='mt-1 text-[11px] font-bold text-[#B9651B]'>{f}</div>
+                  ))}
                 </td>
                 <td className='py-[11px] pr-3 text-[13px] border-b border-border align-middle'>
                   <div className='flex items-center gap-2'>
@@ -2441,6 +2589,12 @@ function GestionAlumnos() {
                       onClick={() => setLegajoId(a.id_alumno)}
                     >
                       Ver legajo
+                    </button>
+                    <button
+                      className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                      onClick={() => { setVinculosDe(a) }}
+                    >
+                      Vínculos
                     </button>
                     <button
                       className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
@@ -2482,6 +2636,13 @@ function GestionAlumnos() {
           </tbody>
         </table>
       </div>
+      {vinculosDe && (
+        <VinculosAlumno
+          alumno={vinculosDe}
+          onCerrar={() => { setVinculosDe(null) }}
+          onCambio={() => { void load() }}
+        />
+      )}
     </div>
   )
 }
@@ -3025,6 +3186,7 @@ function LegajoAlumno({
 // ═══════════════════════════════════════════════════════════════
 function GestionDocentes() {
   const [docentes, setDocentes] = useState<Docente[]>([])
+  const [cuentaDe, setCuentaDe] = useState<Docente | null>(null)
   // TP Metodología II · RF2.2 / RF2.3 / RF2.4
   const [busqueda, setBusqueda] = useState('')
   const [editId, setEditId] = useState<number | null>(null)
@@ -3174,8 +3336,8 @@ function GestionDocentes() {
         <p style={{ fontSize: 13, color: '#6B6B8A', margin: 0 }}>
           Para agregar docentes, creá el usuario desde{' '}
           <strong>Usuarios</strong> con rol <strong>Docente</strong> y completá
-          sus datos. Desde acá podés consultarlos, editarlos y cambiar su
-          estado.
+          sus datos. Desde acá podés consultarlos, editarlos, cambiar su
+          estado y crear o vincular su cuenta de acceso.
         </p>
       </div>
 
@@ -3405,6 +3567,12 @@ function GestionDocentes() {
                       Editar
                     </button>
                     <button
+                      className='bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+                      onClick={() => { setCuentaDe(d) }}
+                    >
+                      {d.id_usuario ? 'Cuenta' : 'Crear o vincular cuenta'}
+                    </button>
+                    <button
                       className={
                         d.activo
                           ? 'bg-[#E74C3C1A] text-red border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
@@ -3438,6 +3606,13 @@ function GestionDocentes() {
           </tbody>
         </table>
       </div>
+      {cuentaDe && (
+        <CuentaDocente
+          docente={cuentaDe}
+          onCerrar={() => { setCuentaDe(null) }}
+          onCambio={() => { void load() }}
+        />
+      )}
     </div>
   )
 }
