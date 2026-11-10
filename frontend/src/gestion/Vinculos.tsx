@@ -25,6 +25,12 @@ const INPUT = 'w-full px-[14px] py-[10px] rounded-input border-2 border-border t
 const LABEL = 'text-[11px] font-extrabold text-textMuted block mb-[5px]'
 const BOTON = 'bg-gradient-to-br from-purple-700 to-purpleMid text-white border-0 rounded-btn py-[9px] px-4 text-[13px] font-extrabold cursor-pointer disabled:opacity-60'
 const BOTON_SUAVE = 'bg-purpleLight text-purple-700 border-0 rounded-lg py-[6px] px-3 text-xs font-extrabold cursor-pointer'
+const ERROR_LECTURA = 'No se pudieron cargar los vínculos. Cerrá la ventana e intentá de nuevo.'
+
+/** Registra un rechazo inesperado (el servicio devuelve resultados controlados). */
+function registrarRechazo(origen: string, error: unknown) {
+  console.error(`[Vinculos] ${origen}:`, { nombre: error instanceof Error ? error.name : typeof error })
+}
 
 export function Ventana({ titulo, onCerrar, children }: { titulo: string; onCerrar: () => void; children: ReactNode }) {
   return (
@@ -147,11 +153,18 @@ export function VinculosAlumno({ alumno, onCerrar, onCambio }: { alumno: AlumnoV
 
   useEffect(() => {
     let vigente = true
-    ServicioVinculos.vinculosAlumno(estado).then((r) => {
-      if (!vigente) return
-      if (r.ok) { setTutor(r.dato.tutor); setCuenta(r.dato.cuenta) } else setMsg(r.mensaje)
-      setCargando(false)
-    })
+    ServicioVinculos.vinculosAlumno(estado)
+      .then((r) => {
+        if (!vigente) return
+        if (r.ok) { setTutor(r.dato.tutor); setCuenta(r.dato.cuenta) } else setMsg(r.mensaje)
+        setCargando(false)
+      })
+      .catch((error: unknown) => {
+        registrarRechazo('vinculosAlumno', error)
+        if (!vigente) return
+        setMsg(ERROR_LECTURA)
+        setCargando(false)
+      })
     return () => { vigente = false }
   }, [estado])
 
@@ -273,10 +286,16 @@ export function VinculosUsuario({ usuario, onCerrar }: { usuario: UsuarioBasico;
 
   useEffect(() => {
     let vigente = true
-    ServicioVinculos.vinculosUsuario({ id_usuario: usuario.id_usuario, rol: usuario.rol ?? '' }).then((r) => {
-      if (!vigente) return
-      if (r.ok) setVinculos(r.dato); else setMsg(r.mensaje)
-    })
+    ServicioVinculos.vinculosUsuario({ id_usuario: usuario.id_usuario, rol: usuario.rol ?? '' })
+      .then((r) => {
+        if (!vigente) return
+        if (r.ok) setVinculos(r.dato); else setMsg(r.mensaje)
+      })
+      .catch((error: unknown) => {
+        registrarRechazo('vinculosUsuario', error)
+        // La carga termina al mostrar el mensaje ("Cargando…" solo se ve sin mensaje)
+        if (vigente) setMsg(ERROR_LECTURA)
+      })
     return () => { vigente = false }
   }, [usuario, version])
 
